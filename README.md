@@ -31,6 +31,7 @@ plugins/
 vault/
   vault_mcp.py              password vault MCP server (Fernet-encrypted SQLite; the agent uses secrets without seeing them)
   google_mcp.py             Google connector MCP server: several accounts, Gmail read/filters, Drive, Calendar, Docs, Sheets
+  calendly_mcp.py           Calendly connector MCP server: links, upcoming bookings, changes, availability, one-time links
   requirements.txt          mcp<2, cryptography, google-auth, google-api-python-client (the vault's own venv)
 scripts/                    deployed to $HERMES_HOME/scripts (only *.py)
   brain_cli.py              bulk import / search / one pipeline pass
@@ -44,6 +45,7 @@ scripts/                    deployed to $HERMES_HOME/scripts (only *.py)
                             scanning, osv-scanner + gitleaks on shallow clones, Uptime Kuma 7-day uptime
   repo_watch_weekly.py      cron wrappers (cron can't pass script arguments): full weekly report /
   repo_watch_daily.py       daily alert that prints only when something is new or newly broken
+  calendly_watch.py         every 15 min: one line per new Calendly booking or cancellation (silent otherwise)
   research_digest.py        ~5 new papers + ~5 news stories matching your interests, one "why it matters" line each
   check_public.sh           privacy scan for this repo (not deployed)
 locales/en.yaml             string overlay (expired-approval footer that tells you what to type)
@@ -53,7 +55,7 @@ config/repo_watch.example.json settings for repo_watch.py (copy to $HERMES_HOME/
 config/research_interests.example.json interests for research_digest.py (copy to $HERMES_HOME/config/research_interests.json)
 config/config.template.yaml only the settings that differ from Hermes defaults, with <PLACEHOLDERS>
 docs/                       GitHub Pages: index.html, privacy.html
-tests/                      vault, Google connector, cleanup, backup, repo_watch and research_digest tests (plugin tests live next to each plugin)
+tests/                      vault, Google and Calendly connectors, cleanup, backup, repo_watch and research_digest tests (plugin tests live next to each plugin)
 ```
 
 ## Install
@@ -224,6 +226,43 @@ The same flow is available from a shell:
 stdin), `google_mcp.py accounts`, and `google_mcp.py test work` (one harmless read per API).
 `google_disconnect` revokes the token at Google and deletes it from the vault.
 
+## Calendly connector
+
+`vault/calendly_mcp.py` is a third MCP server in the vault venv (it uses `requests`). It talks to the
+Calendly API v2 for your own account with a **personal access token stored in the vault**
+(`CALENDLY_TOKEN`, read in code and never printed or returned).
+
+| tool | what it does |
+|---|---|
+| `calendly_links` | main booking page + each event type (name, duration, active, scheduling URL) |
+| `calendly_upcoming(days=14)` | booked meetings: invitee names/emails, local start/end, join link, cancel/reschedule URLs |
+| `calendly_recent_changes(hours=24)` | meetings newly booked or canceled in that window |
+| `calendly_availability` | availability schedules: weekly hours and upcoming date overrides |
+| `calendly_single_use_link(event_type="30min")` | a one-time booking link (expires after one booking) |
+| `calendly_cancel(event_uuid, reason)` | cancel a meeting; the description says only when the owner explicitly asks |
+
+Everything else is read-only. Calendly's edge returns 403 to Python's default User-Agent, so every request
+sends `User-Agent: hermes-calendly/1.0` and `Accept: application/json`.
+
+**Setup:** create a personal access token (Calendly > Integrations > API & Webhooks), save it with
+`vault_mcp.py set CALENDLY_TOKEN --service calendly < token-file`, add the `mcp_servers.calendly` entry from
+`config/config.template.yaml`, restart the gateway. CLI: `calendly_mcp.py links | upcoming [days] |
+changes [hours] | availability` (add `--json` for raw output).
+
+**Notifications:** `scripts/calendly_watch.py` is a script-only cron job. Each run it compares the scheduled
+events (yesterday to a year ahead) with `$HERMES_HOME/state/calendly_watch.json` and prints
+`📅 New Calendly booking: <name> · <Thu Oct 8, 2:00 PM> · <type>` or `❌ Calendly booking canceled: ...`;
+nothing otherwise. The first run only records a baseline. Two failed runs in a row stay silent; the third
+exits non-zero so the failure notice fires. Run it with the vault venv's Python:
+
+```bash
+hermes cron create "*/15 * * * *" "Calendly bookings watch" --name calendly-watch --script calendly_watch.py \
+  --no-agent --interpreter $HERMES_HOME/vault/.venv/bin/python --deliver <platform:chat_id>
+```
+
+If Calendly is connected to a Google calendar, bookings also show up there as ordinary calendar events,
+so a calendar-based briefing lists them once without asking Calendly.
+
 ## Stable updates
 
 `hermes update` always tracks upstream `main`. This repo pins a commit instead, so the install only
@@ -275,7 +314,8 @@ The brain and topic-router suites import Hermes, so they run on Hermes's runtime
 `hermes --run-module unittest` with a throwaway `HERMES_HOME`. The other suites need only Python
 (the vault ones also need `cryptography`, plus `mcp` for the tool-registration test; the Google connector
 tests are offline with mocked Google clients and need the vault venv's packages, so run them with
-`$HERMES_HOME/vault/.venv/bin/python -m unittest tests/test_google.py`).
+`$HERMES_HOME/vault/.venv/bin/python -m unittest tests/test_google.py`; the same goes for
+`tests/test_calendly.py`, which uses a fake HTTP session).
 
 ## What is NOT here
 

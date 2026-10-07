@@ -161,6 +161,14 @@ mcp_servers:
     env:
       VAULT_OWNER_NAME: <OWNER_NAME>
       GOOGLE_DEFAULT_TZ: <TIMEZONE>      # e.g. Europe/Berlin; calendar times; default UTC
+  calendly:                            # needs a Calendly personal access token in the vault as CALENDLY_TOKEN
+    command: <HERMES_HOME>/vault/.venv/bin/python
+    args: [<HERMES_HOME>/vault/calendly_mcp.py, serve]
+    connect_timeout: 30.0
+    enabled: true
+    env:
+      VAULT_OWNER_NAME: <OWNER_NAME>
+      CALENDLY_TZ: <TIMEZONE>           # display timezone; default = the Calendly account's timezone
 
 # --- toolset trims: drop toolsets that are unused or unavailable --------------
 # Removed from every platform: image_gen, video, video_gen, tts, connections, computer_use.

@@ -102,6 +102,7 @@ deploy_skeleton() {
     run chmod 700 "$HERMES_HOME/vault"
     install_file "$REPO_ROOT/vault/vault_mcp.py" "$HERMES_HOME/vault/vault_mcp.py" 755
     install_file "$REPO_ROOT/vault/google_mcp.py" "$HERMES_HOME/vault/google_mcp.py" 755
+    install_file "$REPO_ROOT/vault/calendly_mcp.py" "$HERMES_HOME/vault/calendly_mcp.py" 755
     install_file "$REPO_ROOT/vault/requirements.txt" "$HERMES_HOME/vault/requirements.txt"
     ok "skeleton files deployed"
 }
