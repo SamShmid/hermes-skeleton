@@ -1,0 +1,11 @@
+name: brain
+version: 0.1.0
+description: "Long-term brain: SQLite+FTS5 facts and wiki recall before each turn, brain_search / brain_remember tools, and automatic extract -> approve memory (the worker lives in brain-ops)."
+author: hermes-skeleton
+hooks:
+  - prefetch
+  - sync_turn
+  - on_pre_compress
+  - on_session_end
+  - on_session_switch
+  - on_memory_write

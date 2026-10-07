@@ -1,0 +1,5 @@
+# Pinned upstream Hermes Agent commit. bin/install.sh and bin/update.sh check out exactly this
+# commit (detached). Change it only with bin/bump-version.sh after testing a candidate.
+HERMES_REPO=https://github.com/NousResearch/hermes-agent.git
+HERMES_COMMIT=59a3866ea5a07290afd9a1d137d52d679b77f3ab
+HERMES_LABEL="v0.21.5 (config schema v50), upstream main 2026-10-06"

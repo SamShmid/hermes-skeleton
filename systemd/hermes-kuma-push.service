@@ -1,0 +1,8 @@
+[Unit]
+Description=Push hermes-gateway health to an Uptime Kuma push monitor
+ConditionPathExists=%h/.config/hermes-kuma-push.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/hermes-kuma-push.env
+ExecStart=%h/.local/bin/hermes-kuma-push

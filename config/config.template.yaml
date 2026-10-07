@@ -1,0 +1,157 @@
+# Hermes Skeleton: config.yaml overlay
+# ---------------------------------------------------------------------------
+# ONLY the settings this setup changes from Hermes's defaults (checked against the
+# pinned version in HERMES_VERSION). Everything else stays at upstream defaults, so
+# upstream config migrations keep working.
+#
+# How to use: merge these keys into $HERMES_HOME/config.yaml (by hand, or one key at a
+# time with `hermes config set <dotted.key> <value>`), replacing every <PLACEHOLDER>.
+# Do not copy this file over config.yaml wholesale. Real IDs and channel prompts belong
+# in your private config, not in this public repo.
+#
+# Placeholders:
+#   <DISCORD_CHANNEL_ID_...>  Discord channel IDs (Developer Mode -> right-click -> Copy ID)
+#   <MAIN_PROVIDER>/<MAIN_MODEL>          your main chat model
+#   <AUX_PROVIDER>/<AUX_MODEL>            a cheap fast model for background tasks
+#   <OWNER_NAME>/<OWNER_PRONOUNS>         how the brain's LLM prompts refer to you
+#   <HERMES_HOME>                          absolute path of $HERMES_HOME (usually $HOME/.hermes, expanded)
+# ---------------------------------------------------------------------------
+
+model:
+  provider: <MAIN_PROVIDER>
+  default: <MAIN_MODEL>
+
+agent:
+  reasoning_effort: medium          # was xhigh; medium is much faster for chat
+  clarify_timeout: 0                # clarify questions never time out
+  restart_drain_timeout: 60
+
+# --- approvals: wait (practically) forever; typed answers always work --------
+approvals:
+  mode: manual
+  timeout: 31536000                 # maximum Hermes allows (~1 year)
+  discord_prompt_timeout: 900       # Discord buttons die after <= 15 min anyway;
+                                    # plugin approval-expiry-notice then posts typed-answer help
+  destructive_slash_confirm: false
+clarify:
+  timeout: 0
+
+# --- quiet chat (Claude-Code-like): tool names in one line, no results dumps ---
+display:
+  show_reasoning: false
+  show_commentary: false
+  memory_notifications: "off"
+  background_process_notifications: error
+  streaming: true
+  platforms:
+    discord:
+      tool_progress: new
+      interim_assistant_messages: false
+      busy_ack_detail: false
+      show_reasoning: false
+    telegram:
+      tool_progress: new
+      interim_assistant_messages: false
+      busy_ack_detail: false
+      show_reasoning: false
+      cleanup_progress: true
+
+# --- Discord behaviour: no mentions, inline replies, fixed channel list --------
+discord:
+  require_mention: false
+  auto_thread: false
+  history_backfill: false
+  allowed_channels:
+    - "<DISCORD_CHANNEL_ID_QUICK_THOUGHTS>"
+    - "<DISCORD_CHANNEL_ID_PROJECTS>"
+    - "<DISCORD_CHANNEL_ID_SYSTEM_STATUS>"
+    # ...one entry per channel Hermes may use
+  free_response_channels:           # same list: answer without an @mention
+    - "<DISCORD_CHANNEL_ID_QUICK_THOUGHTS>"
+    - "<DISCORD_CHANNEL_ID_PROJECTS>"
+    - "<DISCORD_CHANNEL_ID_SYSTEM_STATUS>"
+  channel_prompts:                  # optional per-channel system prompt
+    "<DISCORD_CHANNEL_ID_QUICK_THOUGHTS>": "This is #quick-thoughts: quick questions and notes. Keep answers short and plain."
+    "<DISCORD_CHANNEL_ID_SYSTEM_STATUS>": "This is #system-status: Hermes health and service notices. Report verified state only."
+# The gateway's home channel (cron failure alerts etc.) is DISCORD_HOME_CHANNEL in .env,
+# e.g. DISCORD_HOME_CHANNEL=<DISCORD_CHANNEL_ID_SYSTEM_STATUS>
+
+# --- no autonomous agent spawning ---------------------------------------------
+kanban:
+  dispatch_in_gateway: false
+  auto_decompose: false
+delegation:
+  max_concurrent_children: 5
+  child_timeout_seconds: 600
+
+# --- browser: built-in tools only (the Browser Use backend leaked daemons) -----
+browser:
+  backend: "off"
+  cloud_provider: local
+  use_gateway: false
+
+# --- context compression --------------------------------------------------------
+compression:
+  in_place: false                   # keep a continuation session instead of rewriting history
+  hygiene_hard_message_limit: 400
+# Note: auto-compression does not fire below ~75% of context on models under 512K,
+# whatever compression.threshold says.
+
+# --- maintenance --------------------------------------------------------------
+checkpoints:
+  enabled: true
+  max_snapshots: 50
+  delete_orphans: true
+updates:
+  pre_update_backup: true
+  # check: false                    # optional: the version is pinned here, so passive update notices are noise
+sessions:
+  auto_prune: false
+
+# --- memory: the brain plugin ---------------------------------------------------
+memory:
+  provider: brain                   # plugins/brain (exclusive memory provider)
+  write_approval: false             # the brain's own approver checks mirrored writes
+  flush_min_turns: 6
+
+# --- plugins ------------------------------------------------------------------
+plugins:
+  enabled:
+    - brain-ops
+    - topic-router
+    - quiet-background
+    - approval-expiry-notice
+  entries:
+    brain:
+      settings:
+        owner_name: "<OWNER_NAME>"          # leave empty for "the user"
+        owner_pronouns: "<OWNER_PRONOUNS>"  # optional, e.g. they/them
+        channel_projects:                   # optional default project per chat
+          "<DISCORD_CHANNEL_ID_HOME_ASSISTANT>": home-assistant
+    topic-router:
+      settings:
+        channels:
+          discord: ["<DISCORD_CHANNEL_ID_QUICK_THOUGHTS>"]
+        decider: {backend: llm, timeout_seconds: 120}
+
+# --- auxiliary model slots used by the plugins (pin a cheap fast model) --------
+auxiliary:
+  topic_router:  {provider: <AUX_PROVIDER>, model: <AUX_MODEL>, timeout: 120}
+  brain_extract: {provider: <AUX_PROVIDER>, model: <AUX_MODEL>, timeout: 180}
+  brain_approve: {provider: <AUX_PROVIDER>, model: <AUX_MODEL>, timeout: 180}
+
+# --- MCP: the password vault (vault/vault_mcp.py; install.sh makes its venv) --
+mcp_servers:
+  vault:
+    command: <HERMES_HOME>/vault/.venv/bin/python
+    args: [<HERMES_HOME>/vault/vault_mcp.py, serve]
+    connect_timeout: 30.0
+    enabled: true
+
+# --- toolset trims: drop toolsets that are unused or unavailable --------------
+# Removed from every platform: image_gen, video, video_gen, tts, connections, computer_use.
+platform_toolsets:
+  cli:      [browser, clarify, code_execution, cronjob, delegation, file, memory, session_search, skills, terminal, todo, vision, web]
+  telegram: [browser, clarify, code_execution, cronjob, delegation, file, memory, session_search, skills, terminal, todo, vision, web]
+  discord:  [browser, clarify, code_execution, cronjob, delegation, discord, discord_admin, file, memory, session_search, skills, terminal, todo, vision, web]
+# Also consider plugins.disabled: [platforms/whatsapp] if you do not use WhatsApp.

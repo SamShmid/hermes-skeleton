@@ -1,0 +1,6 @@
+name: quiet-background
+version: "0.1.0"
+description: "Claude-Code-style quiet chat: on internal wake turns (async subagent / background process completions) tell the model to summarize briefly or stay [SILENT] instead of relaying raw results."
+author: hermes-skeleton
+provides_hooks:
+  - pre_llm_call

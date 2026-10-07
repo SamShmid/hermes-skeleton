@@ -1,0 +1,27 @@
+name: topic-router
+version: 0.1.0
+description: >
+  Per-channel topic router. Before each new message in an enabled chat, a
+  disposable decider reads the full current session plus the new message and
+  answers continue / new / unsure. New = real /new reset plus a visible
+  divider; unsure = hold the message and ask. /new and /clear also post the
+  divider. Needs plugins.isolation: in_process (the default).
+author: hermes-skeleton
+provides_hooks:
+  - pre_gateway_dispatch
+  - on_session_reset
+config_schema:
+  channels:
+    type: dict
+    description: >
+      Enabled chats per platform, e.g. {discord: ["<channel id>"],
+      telegram: ["<dm chat id>"]}. Empty = plugin does nothing.
+    default: {}
+  decider:
+    type: dict
+    description: >
+      {backend: llm | ask | "package.module:Class", timeout_seconds: 120,
+      options: {...}}. The llm backend uses the auxiliary.topic_router model
+      slot (provider / model / base_url), which follows Hermes's auxiliary
+      default until pinned.
+    default: {backend: llm, timeout_seconds: 120}

@@ -1,0 +1,7 @@
+name: approval-expiry-notice
+version: "0.1.0"
+description: "When Discord approval buttons expire but the approval is still pending, post a message explaining how to answer by typing."
+author: hermes-skeleton
+provides_hooks:
+  - pre_approval_request
+  - post_approval_response

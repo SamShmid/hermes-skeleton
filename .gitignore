@@ -1,0 +1,30 @@
+# Never commit personal data or secrets.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.key
+*.enc
+.env
+.env.*
+!*.env.example
+auth.json
+config.yaml
+/vault/*
+!/vault/vault_mcp.py
+!/vault/requirements.txt
+/brain/
+brain/
+!/plugins/brain/
+wiki/
+memories/
+
+# Python / tooling
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.DS_Store
+*.bak-skeleton

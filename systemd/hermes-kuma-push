@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Push hermes-gateway health to an Uptime Kuma "Push" monitor. Run by hermes-kuma-push.timer (every minute).
+# Settings come from the environment (the service loads ~/.config/hermes-kuma-push.env):
+#   KUMA_PUSH_URL   full push URL, e.g. https://kuma.example.com/api/push/<push-token>   (required)
+#   KUMA_HOST_LABEL optional text included in the status message (e.g. "home server")
+#   KUMA_UNIT       unit to check (default hermes-gateway.service)
+set -u
+ENV_FILE="${KUMA_ENV_FILE:-$HOME/.config/hermes-kuma-push.env}"
+if [ -z "${KUMA_PUSH_URL:-}" ] && [ -r "$ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$ENV_FILE"
+fi
+: "${KUMA_PUSH_URL:?set KUMA_PUSH_URL in $ENV_FILE}"
+unit="${KUMA_UNIT:-hermes-gateway.service}"
+where="${KUMA_HOST_LABEL:+ ($KUMA_HOST_LABEL)}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if systemctl --user is-active --quiet "$unit"; then
+    status=up; msg="$unit is active$where"
+else
+    status=down; msg="$unit is not active$where"
+fi
+curl -fsS --max-time 15 --get --data-urlencode "status=$status" --data-urlencode "msg=$msg" \
+    "${KUMA_PUSH_URL%%\?*}" >/dev/null

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes Skeleton</title>
+<meta name="description" content="A personal Hermes Agent setup, and the homepage of a private, single-user assistant app named Hermes.">
+<style>
+  :root { --bg: #fbfbf9; --fg: #1d1d1b; --muted: #5f5f5a; --line: #e2e2dc; --accent: #2f5d8a; --code: #f0f0eb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161615; --fg: #ececea; --muted: #a3a39e; --line: #2c2c2a; --accent: #8ab4dc; --code: #222220; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 8px; }
+  h2 { font-size: 1.2rem; margin: 36px 0 8px; }
+  p, li { color: var(--fg); }
+  .lede { color: var(--muted); font-size: 1.1rem; margin: 0 0 24px; }
+  a { color: var(--accent); }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: .92em; }
+  ul { padding-left: 1.2em; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; margin: 24px 0; }
+  footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Hermes Skeleton</h1>
+  <p class="lede">A personal <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a> setup, published as a reusable skeleton.</p>
+
+  <div class="card">
+    <strong>About the "Hermes" app.</strong>
+    This page is also the homepage of <em>Hermes</em>, a private, single-user assistant. It runs on its
+    owner's own server and acts only for that one person. It is not a public service, and nobody else
+    can sign up for it or use it. See the <a href="privacy.html">privacy policy</a>.
+  </div>
+
+  <h2>What this repository is</h2>
+  <p>The code that turns a stock Hermes Agent install into this particular setup, without forking Hermes:</p>
+  <ul>
+    <li><strong>Plugins:</strong> a long-term memory ("brain") with automatic fact extraction and a separate
+      approver, a per-channel topic router, quiet background notifications, and approval-expiry notices.</li>
+    <li><strong>A password vault</strong> as an MCP server, so the agent can use secrets without ever seeing them.</li>
+    <li><strong>Maintenance scripts</strong> for nightly brain tidying, daily reports and housekeeping.</li>
+    <li><strong>A config overlay</strong> holding only the settings that differ from Hermes's defaults.</li>
+    <li><strong>A pinned upstream version</strong> with install and update scripts, so updates move to a
+      tested commit instead of whatever is newest.</li>
+  </ul>
+
+  <h2>What it is not</h2>
+  <p>It holds no secrets, personal configuration, conversation data or memories. Those live on the owner's
+    server and in a separate private repository.</p>
+
+  <h2>Source</h2>
+  <p>The code, install guide and update flow are in the repository's <code>README.md</code>.
+    Questions or problems: open an issue on the GitHub repository.</p>
+
+  <footer>Hermes Skeleton · MIT License · by SamShmid · <a href="privacy.html">Privacy policy</a></footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# Local overrides of bundled English strings (merged over hermes-agent/locales/en.yaml).
+platform:
+  discord:
+    prompt:
+      expired_footer: "⏱ Buttons expired, but I'm still waiting. Type approve, session, always or deny (or your answer)."

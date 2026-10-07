@@ -1,0 +1,5 @@
+name: brain-ops
+version: 0.1.0
+description: "Companion to the brain memory provider: /brain and /project commands, brain_extract / brain_approve auxiliary LLM tasks, and the background extract -> approve worker (runs only inside the gateway)."
+author: hermes-skeleton
+kind: standalone
