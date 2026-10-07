@@ -44,14 +44,16 @@ scripts/                    deployed to $HERMES_HOME/scripts (only *.py)
                             scanning, osv-scanner + gitleaks on shallow clones, Uptime Kuma 7-day uptime
   repo_watch_weekly.py      cron wrappers (cron can't pass script arguments): full weekly report /
   repo_watch_daily.py       daily alert that prints only when something is new or newly broken
+  research_digest.py        ~5 new papers + ~5 news stories matching your interests, one "why it matters" line each
   check_public.sh           privacy scan for this repo (not deployed)
 locales/en.yaml             string overlay (expired-approval footer that tells you what to type)
 systemd/                    gateway unit template, memory-limit drop-in, Uptime Kuma push timer + script
 config/backup.conf.example settings for backup_data.py (copy to $HERMES_HOME/backup.conf)
 config/repo_watch.example.json settings for repo_watch.py (copy to $HERMES_HOME/config/repo_watch.json)
+config/research_interests.example.json interests for research_digest.py (copy to $HERMES_HOME/config/research_interests.json)
 config/config.template.yaml only the settings that differ from Hermes defaults, with <PLACEHOLDERS>
 docs/                       GitHub Pages: index.html, privacy.html
-tests/                      vault, Google connector, cleanup, backup and repo_watch tests (plugin tests live next to each plugin)
+tests/                      vault, Google connector, cleanup, backup, repo_watch and research_digest tests (plugin tests live next to each plugin)
 ```
 
 ## Install
@@ -145,6 +147,34 @@ hermes cron create "0 13 * * 1" --name repo-watch-weekly --script repo_watch_wee
 hermes cron create "15 12 * * *" --name repo-watch-daily --script repo_watch_daily.py --no-agent \
   --interpreter $HERMES_HOME/venvs/repo-watch/bin/python --deliver <target> --failure-deliver <target>
 ```
+
+## Research digest
+
+`scripts/research_digest.py` recommends a few new papers and news stories. No API keys: the arXiv API
+(queries from the config, 3 s apart), Hugging Face Daily Papers (upvotes give a boost) and RSS/Atom feeds.
+Everything personal is in `$HERMES_HOME/config/research_interests.json` (see
+`config/research_interests.example.json`): topics with keyword weights (title hits count double),
+`applies_to`, `exclude`, negative keywords, arXiv queries, feeds and per-category news quotas.
+
+- **Ranking:** keyword score + recency + per-feed base score (and position bonus for editor-ranked front
+  pages); near-duplicate stories and arXiv/HF copies are merged.
+- **Optional LLM rerank:** on Hermes's runtime Python (`import hermes_bootstrap` works) the top 20 candidates
+  per list go to the auxiliary client with task slot `research_rank`, which picks the final ones and writes
+  the why-lines. Feed text is passed as untrusted data and only returned ids are used. Anywhere else, or on
+  any model error, it falls back to keyword ranking.
+- **No repeats:** shown items are remembered in `$HERMES_HOME/data/research_digest_seen.json` (120 days);
+  `--dry-run` never writes it.
+
+```bash
+cp config/research_interests.example.json $HERMES_HOME/config/research_interests.json   # then edit
+python3 $HERMES_HOME/scripts/research_digest.py --dry-run --no-llm --format plain
+# optional LLM rerank: set auxiliary.research_rank in config.yaml (see config/config.template.yaml)
+hermes cron create "0 13 * * *" --name research-digest --script research_digest.py --no-agent \
+  --interpreter <Hermes runtime python> --deliver <target> --failure-deliver <target>
+```
+
+Output is Discord-friendly (`--format plain|json` for other uses): masked links with `<url>` so no
+preview cards, one line per item.
 
 ## Google connector
 

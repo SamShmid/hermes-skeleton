@@ -1,0 +1,331 @@
+{
+  "version": 1,
+  "description": "Example interests for scripts/research_digest.py. Copy to $HERMES_HOME/config/research_interests.json and edit: topic keywords ({keyword: weight}; title hits count double), weights, applies_to (item kinds paper/news and/or news categories; empty = everything), exclude (keywords that cancel a topic for an item), arXiv queries, feeds (base_score, position_bonus for editor-ranked front pages), news quotas per category, and the optional LLM rerank task slot.",
+  "owner": "a reader who follows ML/LLM progress, browser fingerprinting / web privacy and computer security",
+  "papers_top": 5,
+  "news_top": 5,
+  "timeout_seconds": 15,
+  "recency_half_life_days": 3,
+  "llm_rerank": {
+    "enabled": true,
+    "task": "research_rank",
+    "candidates": 20,
+    "timeout_seconds": 120
+  },
+  "topics": [
+    {
+      "name": "Browser fingerprinting & web privacy",
+      "description": "browser/device fingerprinting, web tracking, cookies, anti-tracking, privacy-preserving web tech",
+      "weight": 1.5,
+      "keywords": {
+        "fingerprinting": 3,
+        "browser fingerprint": 3,
+        "canvas fingerprinting": 3,
+        "anti-fingerprinting": 3,
+        "web tracking": 2.5,
+        "tracker": 1.5,
+        "trackers": 1.5,
+        "third-party cookies": 2,
+        "cookies": 1,
+        "privacy sandbox": 2,
+        "web privacy": 2.5,
+        "browser": 1,
+        "tor": 1,
+        "deanonymization": 2,
+        "de-anonymization": 2,
+        "privacy": 1,
+        "surveillance": 1,
+        "ad tracking": 2
+      },
+      "exclude": [
+        "radio frequency",
+        "rf fingerprint",
+        "rf fingerprinting",
+        "wireless",
+        "speaker",
+        "model fingerprinting",
+        "llm fingerprinting",
+        "physical layer"
+      ]
+    },
+    {
+      "name": "LLM architecture & efficiency",
+      "description": "new model architectures, attention variants, MoE, state-space models, efficiency, quantization, small models, reasoning",
+      "weight": 1.3,
+      "keywords": {
+        "transformer": 1.5,
+        "attention": 1,
+        "mixture of experts": 2.5,
+        "moe": 2,
+        "state space": 2,
+        "mamba": 2,
+        "linear attention": 2.5,
+        "sparse attention": 2.5,
+        "kv cache": 2,
+        "quantization": 2,
+        "distillation": 1.5,
+        "pruning": 1,
+        "long context": 1.5,
+        "small language model": 3,
+        "small language models": 3,
+        "efficient inference": 2,
+        "speculative decoding": 2,
+        "scaling law": 1.5,
+        "scaling laws": 1.5,
+        "architecture": 1.5,
+        "pretraining": 1,
+        "reasoning": 1,
+        "test-time compute": 2,
+        "recurrent": 1,
+        "hybrid": 1,
+        "diffusion language model": 2,
+        "language model": 1,
+        "llm": 1,
+        "llms": 1
+      },
+      "applies_to": [
+        "paper",
+        "AI / LLM"
+      ]
+    },
+    {
+      "name": "Agents & tool calling",
+      "description": "LLM agents, tool/function calling, computer/browser-use agents, MCP, agent evaluation",
+      "weight": 1.2,
+      "keywords": {
+        "agent": 1.5,
+        "agents": 1.5,
+        "agentic": 2,
+        "tool use": 2.5,
+        "tool calling": 3,
+        "tool-calling": 3,
+        "function calling": 3,
+        "computer use": 2.5,
+        "browser agent": 3,
+        "web agent": 2.5,
+        "mcp": 2,
+        "model context protocol": 3,
+        "multi-agent": 1.5,
+        "coding agent": 2
+      },
+      "applies_to": [
+        "paper",
+        "AI / LLM",
+        "Security"
+      ]
+    },
+    {
+      "name": "Local & open models",
+      "description": "open-weight model releases, local inference (llama.cpp, Ollama, vLLM, GGUF), on-device models",
+      "weight": 1.1,
+      "keywords": {
+        "open-weight": 2.5,
+        "open weights": 2.5,
+        "open-source model": 2,
+        "llama": 1.5,
+        "qwen": 2,
+        "mistral": 1.5,
+        "gemma": 2,
+        "deepseek": 2,
+        "phi": 1,
+        "gguf": 2.5,
+        "llama.cpp": 2.5,
+        "ollama": 2.5,
+        "vllm": 2,
+        "local llm": 3,
+        "on-device": 2,
+        "hugging face": 1,
+        "release": 0.5,
+        "released": 0.5,
+        "benchmark": 0.5
+      },
+      "applies_to": [
+        "paper",
+        "AI / LLM"
+      ]
+    },
+    {
+      "name": "Computer security",
+      "description": "vulnerabilities, exploits, malware, supply-chain attacks, LLM security (prompt injection, jailbreaks), crypto",
+      "weight": 1.0,
+      "keywords": {
+        "vulnerability": 1.5,
+        "vulnerabilities": 1.5,
+        "exploit": 1.5,
+        "exploited": 1.5,
+        "zero-day": 2.5,
+        "0-day": 2.5,
+        "cve": 1.5,
+        "malware": 1.5,
+        "ransomware": 1.5,
+        "phishing": 1,
+        "supply chain": 2,
+        "supply-chain": 2,
+        "side channel": 2,
+        "side-channel": 2,
+        "jailbreak": 2,
+        "prompt injection": 3,
+        "backdoor": 1.5,
+        "breach": 1,
+        "botnet": 1,
+        "authentication": 1,
+        "cryptography": 1,
+        "passkeys": 2,
+        "infostealer": 1.5
+      },
+      "applies_to": [
+        "paper",
+        "Security",
+        "AI / LLM"
+      ]
+    },
+    {
+      "name": "World & geopolitics",
+      "description": "major world news and geopolitics",
+      "weight": 1.0,
+      "keywords": {
+        "war": 1.5,
+        "ceasefire": 2,
+        "sanctions": 1.5,
+        "election": 1.5,
+        "nato": 2,
+        "china": 1.5,
+        "russia": 1.5,
+        "ukraine": 1.5,
+        "israel": 1.5,
+        "iran": 1.5,
+        "gaza": 1.5,
+        "taiwan": 1.5,
+        "treaty": 1.5,
+        "summit": 1,
+        "tariff": 1,
+        "tariffs": 1,
+        "diplomacy": 1,
+        "united nations": 1.5,
+        "coup": 2,
+        "missile": 1
+      },
+      "applies_to": [
+        "World"
+      ]
+    }
+  ],
+  "negative_keywords": [
+    "sponsored",
+    "webinar",
+    "giveaway",
+    "% off",
+    "best vpn",
+    "deal alert",
+    "promo code"
+  ],
+  "papers": {
+    "max_age_days": 7,
+    "min_score": 3.5,
+    "max_per_topic": 2,
+    "arxiv_delay_seconds": 3,
+    "arxiv_queries": [
+      {
+        "name": "LLM architecture",
+        "max_results": 150,
+        "search_query": "(cat:cs.CL OR cat:cs.LG) AND (ti:transformer OR ti:attention OR ti:\"mixture of experts\" OR ti:\"state space\" OR ti:\"small language\" OR ti:quantization OR ti:efficient OR ti:architecture)"
+      },
+      {
+        "name": "Agents and tool calling",
+        "max_results": 100,
+        "search_query": "(cat:cs.CL OR cat:cs.AI OR cat:cs.LG) AND (ti:agent OR ti:agents OR ti:agentic OR ti:\"tool use\" OR ti:\"tool calling\" OR ti:\"function calling\")"
+      },
+      {
+        "name": "Fingerprinting and web privacy",
+        "max_results": 60,
+        "search_query": "abs:fingerprinting OR abs:\"web tracking\" OR abs:\"browser privacy\" OR (cat:cs.CR AND abs:browser)"
+      },
+      {
+        "name": "Security",
+        "max_results": 120,
+        "search_query": "cat:cs.CR"
+      }
+    ],
+    "huggingface_daily": {
+      "enabled": true,
+      "limit": 50
+    }
+  },
+  "news": {
+    "max_age_hours": 48,
+    "min_score": 2,
+    "quotas": {
+      "Security": 2,
+      "AI / LLM": 2,
+      "World": 1
+    },
+    "feeds": [
+      {
+        "name": "BleepingComputer",
+        "short_name": "BleepingComputer",
+        "category": "Security",
+        "url": "https://www.bleepingcomputer.com/feed/",
+        "base_score": 1.5
+      },
+      {
+        "name": "The Hacker News",
+        "short_name": "The Hacker News",
+        "category": "Security",
+        "url": "https://feeds.feedburner.com/TheHackersNews",
+        "base_score": 1.5
+      },
+      {
+        "name": "Krebs on Security",
+        "short_name": "Krebs",
+        "category": "Security",
+        "url": "https://krebsonsecurity.com/feed/",
+        "base_score": 2.5
+      },
+      {
+        "name": "Schneier on Security",
+        "short_name": "Schneier",
+        "category": "Security",
+        "url": "https://www.schneier.com/feed/atom/",
+        "base_score": 2
+      },
+      {
+        "name": "r/LocalLLaMA (top today)",
+        "short_name": "r/LocalLLaMA",
+        "category": "AI / LLM",
+        "url": "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day",
+        "base_score": 1.5,
+        "position_bonus": 2
+      },
+      {
+        "name": "Hugging Face blog",
+        "short_name": "Hugging Face",
+        "category": "AI / LLM",
+        "url": "https://huggingface.co/blog/feed.xml",
+        "base_score": 1.5
+      },
+      {
+        "name": "Simon Willison",
+        "short_name": "Simon Willison",
+        "category": "AI / LLM",
+        "url": "https://simonwillison.net/atom/everything/",
+        "base_score": 1
+      },
+      {
+        "name": "NYT World",
+        "short_name": "NYT",
+        "category": "World",
+        "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+        "base_score": 1,
+        "position_bonus": 2.5
+      },
+      {
+        "name": "BBC World",
+        "short_name": "BBC",
+        "category": "World",
+        "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+        "base_score": 0.5,
+        "position_bonus": 2
+      }
+    ]
+  }
+}

@@ -140,6 +140,7 @@ auxiliary:
   topic_router:  {provider: <AUX_PROVIDER>, model: <AUX_MODEL>, timeout: 120}
   brain_extract: {provider: <AUX_PROVIDER>, model: <AUX_MODEL>, timeout: 180}
   brain_approve: {provider: <AUX_PROVIDER>, model: <AUX_MODEL>, timeout: 180}
+  research_rank: {provider: <AUX_PROVIDER>, model: <AUX_MODEL>, timeout: 120}   # scripts/research_digest.py rerank
 
 # --- MCP: the password vault (vault/vault_mcp.py; install.sh makes its venv) --
 mcp_servers:
