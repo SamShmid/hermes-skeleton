@@ -1,2 +1,6 @@
 mcp>=1.2,<2
 cryptography
+# google_mcp.py (Google connector)
+google-auth
+google-api-python-client
+requests

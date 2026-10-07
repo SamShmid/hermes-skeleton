@@ -14,6 +14,7 @@
 #   <MAIN_PROVIDER>/<MAIN_MODEL>          your main chat model
 #   <AUX_PROVIDER>/<AUX_MODEL>            a cheap fast model for background tasks
 #   <OWNER_NAME>/<OWNER_PRONOUNS>         how the brain's LLM prompts refer to you
+#   <TIMEZONE>                             IANA time zone for the Google connector's calendar times
 #   <HERMES_HOME>                          absolute path of $HERMES_HOME (usually $HOME/.hermes, expanded)
 # ---------------------------------------------------------------------------
 
@@ -147,6 +148,18 @@ mcp_servers:
     args: [<HERMES_HOME>/vault/vault_mcp.py, serve]
     connect_timeout: 30.0
     enabled: true
+    env:
+      VAULT_OWNER_NAME: <OWNER_NAME>
+  # Google connector (vault/google_mcp.py): several Google accounts, tokens encrypted in the vault.
+  # Needs <HERMES_HOME>/google/client_secret.json (OAuth "Desktop app" client, mode 600). See README.
+  google:
+    command: <HERMES_HOME>/vault/.venv/bin/python
+    args: [<HERMES_HOME>/vault/google_mcp.py, serve]
+    connect_timeout: 30.0
+    enabled: true
+    env:
+      VAULT_OWNER_NAME: <OWNER_NAME>
+      GOOGLE_DEFAULT_TZ: <TIMEZONE>      # e.g. Europe/Berlin; calendar times; default UTC
 
 # --- toolset trims: drop toolsets that are unused or unavailable --------------
 # Removed from every platform: image_gen, video, video_gen, tts, connections, computer_use.

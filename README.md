@@ -30,7 +30,8 @@ plugins/
   approval-expiry-notice/   when Discord approval buttons expire, post how to answer by typing
 vault/
   vault_mcp.py              password vault MCP server (Fernet-encrypted SQLite; the agent uses secrets without seeing them)
-  requirements.txt          mcp>=1.2,<2 and cryptography (installed into the vault's own venv)
+  google_mcp.py             Google connector MCP server: several accounts, Gmail read/filters, Drive, Calendar, Docs, Sheets
+  requirements.txt          mcp<2, cryptography, google-auth, google-api-python-client (the vault's own venv)
 scripts/                    deployed to $HERMES_HOME/scripts (only *.py)
   brain_cli.py              bulk import / search / one pipeline pass
   brain_tidy.py             nightly: dedupe, merge/contradiction proposals, wiki page refresh, secret-text flags
@@ -41,7 +42,7 @@ locales/en.yaml             string overlay (expired-approval footer that tells y
 systemd/                    gateway unit template, memory-limit drop-in, Uptime Kuma push timer + script
 config/config.template.yaml only the settings that differ from Hermes defaults, with <PLACEHOLDERS>
 docs/                       GitHub Pages: index.html, privacy.html
-tests/                      vault and cleanup tests (plugin tests live next to each plugin)
+tests/                      vault, Google connector and cleanup tests (plugin tests live next to each plugin)
 ```
 
 ## Install
@@ -77,6 +78,54 @@ It never touches `config.yaml`, `.env`, auth files, databases or vault data. The
   Hermes's runtime Python, since it imports Hermes's LLM client), `brain_report.py` hourly (it prints only
   during `--hour` in `--tz`).
 - `systemctl --user restart hermes-gateway && hermes gateway status`.
+
+## Google connector
+
+`vault/google_mcp.py` is a second MCP server that runs from the vault's venv. It connects any number of
+Google accounts, each under a short label you choose (for example `personal`, `work`). Each account's
+OAuth token is stored **encrypted in the vault** (`GOOGLE_TOKEN_<LABEL>`, service `google`). Access tokens
+refresh automatically and the refreshed token is written back.
+
+Tools (every data tool takes `account`):
+
+| Area | Tools |
+|---|---|
+| accounts | `google_accounts`, `google_connect_start`, `google_connect_finish`, `google_disconnect` |
+| Gmail | `gmail_search`, `gmail_read`, `gmail_list_filters`, `gmail_create_filter` (trash / archive / label), `gmail_delete_filter` |
+| Drive | `drive_search`, `drive_read` (Docs/Slides as text, Sheets as CSV, small text files), `drive_upload`, `drive_create_folder` |
+| Calendar | `calendar_list`, `calendar_create_event` |
+| Docs / Sheets | `docs_create`, `sheets_read`, `sheets_append` |
+
+There is deliberately **no** tool that sends email, deletes email or deletes files. The scopes are
+`openid`, `userinfo.email`, `gmail.modify`, `gmail.settings.basic`, `drive`, `calendar`, `documents` and
+`spreadsheets`. `gmail.send` is never requested. Results are capped and email/file content is labelled
+as untrusted data. `drive_upload` refuses the vault, `.env`, `auth.json`, `~/.ssh` and key files.
+
+**One-time setup (Google Cloud console):**
+
+1. Create a project, enable the Gmail, Drive, Calendar, Docs and Sheets APIs.
+2. OAuth consent screen: External, add the scopes above, then publish it. For personal use (well under
+   100 users) the unverified app works without verification; each account sees one "unverified app" warning.
+   Leaving it in "Testing" also works, but refresh tokens then expire after 7 days.
+3. Credentials: create an OAuth client of type **Desktop app**, download the JSON to
+   `$HERMES_HOME/google/client_secret.json` and `chmod 600` it.
+4. Add the `mcp_servers.google` entry from `config/config.template.yaml` and restart the gateway.
+
+**Connecting an account (works from chat, no browser on the server):**
+
+1. Ask the agent to connect, e.g. "connect my work Google account". It calls
+   `google_connect_start("work")` and sends a sign-in link (PKCE, offline access; valid 30 minutes).
+2. Open the link, pick the account, click Allow (on the warning: *Advanced -> Go to <app name>*) and
+   tick every permission box.
+3. The browser then lands on `http://localhost:1/?state=...&code=...`, which fails to load. That is
+   expected. Copy that address and paste it back to the agent.
+4. The agent calls `google_connect_finish("work", "<address>")`. That exchanges the code, reads the email
+   address, stores the token and warns about any permission that was left unticked.
+
+The same flow is available from a shell:
+`google_mcp.py connect-start work`, `google_mcp.py connect-finish work '<address>'` (or `-` to read it from
+stdin), `google_mcp.py accounts`, and `google_mcp.py test work` (one harmless read per API).
+`google_disconnect` revokes the token at Google and deletes it from the vault.
 
 ## Stable updates
 
@@ -127,7 +176,9 @@ bin/test.sh --hermes /path/to/hermes
 
 The brain and topic-router suites import Hermes, so they run on Hermes's runtime through
 `hermes --run-module unittest` with a throwaway `HERMES_HOME`. The other suites need only Python
-(the vault ones also need `cryptography`, plus `mcp` for the tool-registration test).
+(the vault ones also need `cryptography`, plus `mcp` for the tool-registration test; the Google connector
+tests are offline with mocked Google clients and need the vault venv's packages, so run them with
+`$HERMES_HOME/vault/.venv/bin/python -m unittest tests/test_google.py`).
 
 ## What is NOT here
 

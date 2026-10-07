@@ -101,6 +101,7 @@ deploy_skeleton() {
     run mkdir -p "$HERMES_HOME/vault"
     run chmod 700 "$HERMES_HOME/vault"
     install_file "$REPO_ROOT/vault/vault_mcp.py" "$HERMES_HOME/vault/vault_mcp.py" 755
+    install_file "$REPO_ROOT/vault/google_mcp.py" "$HERMES_HOME/vault/google_mcp.py" 755
     install_file "$REPO_ROOT/vault/requirements.txt" "$HERMES_HOME/vault/requirements.txt"
     ok "skeleton files deployed"
 }
@@ -114,7 +115,7 @@ vault_venv() {
     local venv="$HERMES_HOME/vault/.venv" req="$REPO_ROOT/vault/requirements.txt"
     local stamp="$venv/.skeleton-req-hash" hash
     hash="$(sha256_of "$req")"
-    if [ -x "$venv/bin/python" ] && "$venv/bin/python" -c 'import mcp.server.fastmcp, cryptography' >/dev/null 2>&1 \
+    if [ -x "$venv/bin/python" ] && "$venv/bin/python" -c 'import mcp.server.fastmcp, cryptography, googleapiclient' >/dev/null 2>&1 \
         && { [ ! -f "$stamp" ] || [ "$(cat "$stamp")" = "$hash" ]; }; then
         # Working venv and requirements unchanged (or a venv made before this repo: adopt it).
         [ "$DRY_RUN" = 1 ] || echo "$hash" > "$stamp"
@@ -137,7 +138,7 @@ vault_venv() {
     else
         die "need python3-venv (sudo apt install python3-venv) or uv to build the vault venv"
     fi
-    "$venv/bin/python" -c 'import mcp.server.fastmcp, cryptography' || die "vault venv is missing mcp/cryptography"
+    "$venv/bin/python" -c 'import mcp.server.fastmcp, cryptography, googleapiclient' || die "vault venv is missing mcp/cryptography/google libraries"
     echo "$hash" > "$stamp"
     ok "vault venv ready"
 }

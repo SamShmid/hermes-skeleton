@@ -13,6 +13,7 @@ auth.json
 config.yaml
 /vault/*
 !/vault/vault_mcp.py
+!/vault/google_mcp.py
 !/vault/requirements.txt
 /brain/
 brain/
