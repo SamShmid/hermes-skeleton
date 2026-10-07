@@ -69,6 +69,55 @@ class CleanupTests(unittest.TestCase):
         self.assertIn("old-job", out)
         self.assertTrue(stale.exists())
 
+    def _old_backup(self, name="pre-change-2020"):
+        root = Path(self.tmp.name) / "backups"
+        entry = root / name
+        entry.mkdir(parents=True)
+        (entry / "state.db").write_text("x")
+        old = 1_000_000_000
+        os.utime(entry / "state.db", (old, old))
+        os.utime(entry, (old, old))
+        return load(self.home, HERMES_CLEANUP_BACKUPS_DIR=str(root)), entry
+
+    def test_manual_backups_kept_without_confirmed_restic_backup(self):
+        mod, entry = self._old_backup()
+        self.assertFalse(mod.restic_backup_confirmed()[0])  # no marker
+        found = mod.old_manual_backups()
+        self.assertEqual([e[0] for e in found], [entry])
+        with mock.patch.object(mod, "stale_processes", return_value=([], {})), \
+                mock.patch.object(mod, "checkpoints", return_value=(0, None)):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                mod.main([])
+        self.assertTrue(entry.exists())
+        self.assertIn("kept 1 old manual backup", buf.getvalue())
+
+    def test_manual_backups_deleted_only_when_confirmed(self):
+        mod, entry = self._old_backup()
+        fresh = entry.parent / "fresh"
+        fresh.mkdir()
+        (fresh / "f").write_text("y")
+        with mock.patch.object(mod, "stale_processes", return_value=([], {})), \
+                mock.patch.object(mod, "checkpoints", return_value=(0, None)), \
+                mock.patch.object(mod, "restic_backup_confirmed", return_value=(True, "ok")):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                mod.main(["--dry-run"])
+            self.assertTrue(entry.exists())
+            self.assertIn("would delete", buf.getvalue())
+            with redirect_stdout(io.StringIO()):
+                mod.main([])
+        self.assertFalse(entry.exists())
+        self.assertTrue(fresh.exists())
+
+    def test_marker_too_old_is_not_confirmed(self):
+        (self.home / "state").mkdir()
+        (self.home / "state" / "backup_last.json").write_text(
+            '{"time": "2020-01-01T00:00:00+00:00", "snapshot": "abc"}')
+        ok, why = self.mod.restic_backup_confirmed()
+        self.assertFalse(ok)
+        self.assertIn("h old", why)
+
 
 if __name__ == "__main__":
     unittest.main()

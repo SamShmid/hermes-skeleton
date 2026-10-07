@@ -20,12 +20,17 @@ What it does
     - /tmp entries owned by this user named hermes*, agent-browser*, browser_harness*,
       browser-use*, tmp*                                                   > 7 days
     - rotated logs ~/.hermes/logs/*.log.<n>[.gz] and logs/process-results/* > 30 days
+  Manual backups: top-level entries of $HERMES_CLEANUP_BACKUPS_DIR (default ~/backups) whose
+    newest file is older than $HERMES_CLEANUP_BACKUPS_DAYS (default 30) days — ONLY when the
+    nightly restic backup (backup_data.py) is confirmed: its marker state/backup_last.json is
+    under 36 h old AND restic lists that snapshot with a recent time. Otherwise nothing is
+    deleted and the report says why. Disabled when backup.conf has no BACKUP_REPO.
   Checkpoints: runs the official `hermes checkpoints prune` with the same limits as
     config.yaml (7 days, 500 MB). Dry-run only shows the store size.
   Disk: warns when / is more than 85 % full and names the biggest home directories.
 
 Never deleted: user data ($HERMES_HOME/data, memories, sessions, state.db, quarantine,
-backups, workspace, skills, config), anything outside the paths above, symlink targets.
+$HERMES_HOME/backups, workspace, skills, config), anything outside the paths above, symlink targets.
 Report timestamps use the host's local time zone (set TZ to change it).
 
 Usage: cleanup.py [--dry-run] [--verbose]
@@ -52,6 +57,9 @@ CACHE_MAX_AGE_DAYS = 7
 TMP_MAX_AGE_DAYS = 7
 LOG_MAX_AGE_DAYS = 30
 DISK_WARN_PCT = 85
+BACKUPS_DIR = Path(os.environ.get("HERMES_CLEANUP_BACKUPS_DIR", HOME / "backups")).expanduser()
+BACKUPS_MAX_AGE_DAYS = int(os.environ.get("HERMES_CLEANUP_BACKUPS_DAYS", "30"))
+BACKUP_MARKER_MAX_AGE_H = 36
 CACHE_DIRS = ["scratch", "terminal-output", "spillover", "partials", "exec"]
 TMP_PREFIXES = ("hermes", "agent-browser", "browser_harness", "browser-use", "tmp")
 PROTECTED_SERVICES = tuple(s for s in os.environ.get("HERMES_CLEANUP_PROTECTED_SERVICES", "hermes-gateway")
@@ -247,6 +255,49 @@ def stale_entries(procs: dict[int, dict]) -> list[tuple[str, Path, int]]:
     return found
 
 
+# ---------------------------------------------------------------- manual backups
+def old_manual_backups() -> list[tuple[Path, int, float]]:
+    """(path, bytes, newest mtime) for every top-level entry of BACKUPS_DIR, oldest first."""
+    if not BACKUPS_DIR.is_dir() or BACKUPS_DIR.is_symlink():
+        return []
+    out = []
+    for entry in BACKUPS_DIR.iterdir():
+        try:
+            size, newest = tree_size_and_newest(entry)
+        except OSError:
+            continue
+        out.append((entry, size, newest))
+    return sorted(out, key=lambda e: e[2])
+
+
+def restic_backup_confirmed() -> tuple[bool, str]:
+    """True only if the nightly restic backup is recent AND restic itself lists that snapshot."""
+    import json
+    marker = HERMES / "state" / "backup_last.json"
+    try:
+        data = json.loads(marker.read_text())
+        when = datetime.fromisoformat(data["time"])
+        snap = data["snapshot"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False, "no restic backup marker (backup_data.py has not succeeded yet)"
+    age_h = (datetime.now(when.tzinfo) - when).total_seconds() / 3600
+    if age_h > BACKUP_MARKER_MAX_AGE_H:
+        return False, f"last restic backup is {age_h:.0f} h old"
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import backup_data  # same scripts dir; reads $HERMES_HOME/backup.conf
+        cfg = backup_data.load_config()
+        if not cfg.get("BACKUP_REPO"):
+            return False, "restic backup not configured"
+        out = backup_data.Restic(cfg).run("snapshots", "--json", snap, timeout=300)
+        snaps = json.loads(out or "[]")
+    except Exception as exc:  # noqa: BLE001 - any doubt means "don't delete"
+        return False, f"could not confirm the restic snapshot ({str(exc)[:80]})"
+    if not snaps:
+        return False, f"restic snapshot {snap[:8]} not found in the repository"
+    return True, f"restic snapshot {snap[:8]} ({age_h:.0f} h old) confirmed"
+
+
 def hermes_command() -> list[str]:
     """The checkout's own launcher, else a legacy venv, else `hermes` on PATH."""
     launcher = HERMES / "hermes-agent" / ".hermes" / "bin" / "hermes"
@@ -332,6 +383,27 @@ def main(argv: list[str] | None = None) -> int:
                 continue
         freed[group] = freed.get(group, 0) + size
         removed.append((group, path, size))
+    # manual backups (~/backups): only once a recent restic backup is confirmed
+    now = time.time()
+    backups_all = old_manual_backups()
+    backups_old = [e for e in backups_all if now - e[2] > BACKUPS_MAX_AGE_DAYS * 86400]
+    backups_gate = (False, "nothing old enough")
+    backups_removed: list[tuple[Path, int, float]] = []
+    if backups_old:
+        backups_gate = restic_backup_confirmed()
+        if backups_gate[0]:
+            for entry, size, newest in backups_old:
+                if not dry:
+                    try:
+                        remove(entry)
+                    except OSError as exc:
+                        errors.append(f"couldn't remove {entry}: {exc.strerror}")
+                        continue
+                backups_removed.append((entry, size, newest))
+                freed["old backups"] = freed.get("old backups", 0) + size
+                removed.append(("old backups", entry, size))
+        else:
+            errors.append(f"kept {len(backups_old)} old manual backup(s) in {BACKUPS_DIR}: {backups_gate[1]}")
     ckpt_freed, ckpt_err = checkpoints(dry)
     if ckpt_err:
         errors.append(ckpt_err)
@@ -357,6 +429,16 @@ def main(argv: list[str] | None = None) -> int:
     lines.extend(disk_lines())
     for err in errors[:5]:
         lines.append(f"⚠️ {err}")
+    if args.verbose or dry:
+        lines.append(f"• Manual backups in {BACKUPS_DIR} (deleted after {BACKUPS_MAX_AGE_DAYS} days, "
+                     f"only with a confirmed restic backup):" if backups_all else
+                     f"• Manual backups: {BACKUPS_DIR} is empty or missing")
+        for entry, size, newest in backups_all:
+            age = (now - newest) / 86400
+            due = datetime.fromtimestamp(newest + BACKUPS_MAX_AGE_DAYS * 86400).astimezone().strftime("%b %-d")
+            state = (("would delete" if dry else "deleted") if (entry, size, newest) in backups_removed
+                     else ("old enough but kept" if age > BACKUPS_MAX_AGE_DAYS else f"eligible {due}"))
+            lines.append(f"  - {entry.name} ({human(size)}, {age:.0f} d old): {state}")
     if args.verbose:
         for p, reason in stopped:
             lines.append(f"  - pid {p['pid']} ({reason}, {p['age'] / 3600:.0f}h): {p['cmd'][:120]}")

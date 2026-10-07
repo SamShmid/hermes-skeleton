@@ -36,13 +36,17 @@ scripts/                    deployed to $HERMES_HOME/scripts (only *.py)
   brain_cli.py              bulk import / search / one pipeline pass
   brain_tidy.py             nightly: dedupe, merge/contradiction proposals, wiki page refresh, secret-text flags
   brain_report.py           daily "what the brain learned" report (silent when nothing changed)
-  cleanup.py                daily housekeeping: stale browser/IMAP processes, old caches, logs, checkpoints
+  cleanup.py                daily housekeeping: stale browser/IMAP processes, old caches, logs, checkpoints,
+                            manual ~/backups older than 30 days (only after a confirmed restic backup)
+  backup_data.py            nightly restic backup: SQLite online-backup snapshots + secrets/config/wiki/skills,
+                            forget --prune (7 daily / 4 weekly / 6 monthly), weekly check
   check_public.sh           privacy scan for this repo (not deployed)
 locales/en.yaml             string overlay (expired-approval footer that tells you what to type)
 systemd/                    gateway unit template, memory-limit drop-in, Uptime Kuma push timer + script
+config/backup.conf.example settings for backup_data.py (copy to $HERMES_HOME/backup.conf)
 config/config.template.yaml only the settings that differ from Hermes defaults, with <PLACEHOLDERS>
 docs/                       GitHub Pages: index.html, privacy.html
-tests/                      vault, Google connector and cleanup tests (plugin tests live next to each plugin)
+tests/                      vault, Google connector, cleanup and backup tests (plugin tests live next to each plugin)
 ```
 
 ## Install
@@ -78,6 +82,32 @@ It never touches `config.yaml`, `.env`, auth files, databases or vault data. The
   Hermes's runtime Python, since it imports Hermes's LLM client), `brain_report.py` hourly (it prints only
   during `--hour` in `--tz`).
 - `systemctl --user restart hermes-gateway && hermes gateway status`.
+
+## Backups (restic)
+
+`scripts/backup_data.py` makes an encrypted, deduplicated nightly backup with
+[restic](https://restic.net). It copies every SQLite database with SQLite's online backup API (never the
+live `.db`/`-wal` files), checks each copy with `PRAGMA quick_check`, backs up the copies plus `.env`,
+`auth.json`, `config.yaml`, `vault/vault.key`, memories, wiki, skills, scripts and plugins, then runs
+`restic forget --prune` and, on Sundays, `restic check --read-data-subset 5%`. It is silent on a normal
+night, prints one line on failure (exit 1, so the cron failure notice fires) and one summary line on Sundays.
+
+Setup, on the Hermes host:
+
+1. Install restic (distro package or the official binary).
+2. A repository somewhere else, e.g. an SFTP account on another server. A dedicated sftp-only user
+   (`ForceCommand internal-sftp`, `ChrootDirectory`) and a dedicated SSH key with `restrict` in
+   `authorized_keys` keep that key from doing anything but file transfer. Put the host in `~/.ssh/config`.
+3. Store a long random repository password in the vault, never in a file:
+   `python3 -c "import secrets; print(secrets.token_urlsafe(36))" | $HERMES_HOME/vault/.venv/bin/python $HERMES_HOME/vault/vault_mcp.py set RESTIC_PASSWORD --service backup --description "restic repo password"`.
+   **Also keep a copy in a password manager**: the vault lives on the same host, and without the password
+   the backups cannot be read.
+4. `cp config/backup.conf.example $HERMES_HOME/backup.conf`, fill in `BACKUP_REPO`, then
+   `RESTIC_REPOSITORY=... RESTIC_PASSWORD_COMMAND="... vault_mcp.py get RESTIC_PASSWORD" restic init`.
+5. Run `backup_data.py --dry-run`, then `backup_data.py --force-summary` once, and test a restore
+   (`restic restore latest --target /tmp/r --include '*/brain.db'`, then `PRAGMA integrity_check`).
+6. Cron: `hermes cron create "30 7 * * *" --name hermes-backup --script backup_data.py --no-agent
+   --deliver <target> --failure-deliver <target>`.
 
 ## Google connector
 

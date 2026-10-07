@@ -81,6 +81,7 @@ ${_B}Done.${_N} Next steps (manual, personal; nothing below is in this repo):
   5. Services survive logout:  sudo loginctl enable-linger $USER
   6. Start:               systemctl --user restart hermes-gateway ; hermes gateway status
   7. Optional cron jobs (script-only): scripts/cleanup.py (daily), scripts/brain_tidy.py (nightly),
-                          scripts/brain_report.py (hourly; prints only in its report hour)
+                          scripts/brain_report.py (hourly; prints only in its report hour),
+                          scripts/backup_data.py (nightly restic backup; see README "Backups")
 Later updates: bin/update.sh (always lands on the commit in HERMES_VERSION).
 EOF

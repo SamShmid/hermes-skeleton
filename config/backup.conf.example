@@ -1,0 +1,19 @@
+# Settings for scripts/backup_data.py. Copy to $HERMES_HOME/backup.conf (mode 600).
+# The repository password is NOT here: it is read from the vault (RESTIC_PASSWORD) at run time.
+
+# restic repository, e.g. an SFTP host alias from ~/.ssh/config
+BACKUP_REPO=sftp:<BACKUP_HOST_ALIAS>:/hermes-restic
+# Optional: a different command that prints the password (default: vault_mcp.py get RESTIC_PASSWORD)
+# BACKUP_PASSWORD_COMMAND=
+# restic --host value (default: this machine's hostname)
+# BACKUP_HOST=
+BACKUP_TAGS=hermes,nightly
+# Time zone used to decide "it's Sunday" (weekly check + summary line)
+BACKUP_TZ=UTC
+# keep-daily,keep-weekly,keep-monthly
+BACKUP_KEEP=7,4,6
+BACKUP_CHECK_SUBSET=5%
+# Databases (relative to $HERMES_HOME) whose absence is an error; other known DBs are skipped if absent
+BACKUP_REQUIRED_DBS=state.db,brain/brain.db,vault/vault.db
+# BACKUP_EXTRA_DBS=
+# BACKUP_EXTRA_PATHS=
