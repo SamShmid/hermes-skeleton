@@ -40,13 +40,18 @@ scripts/                    deployed to $HERMES_HOME/scripts (only *.py)
                             manual ~/backups older than 30 days (only after a confirmed restic backup)
   backup_data.py            nightly restic backup: SQLite online-backup snapshots + secrets/config/wiki/skills,
                             forget --prune (7 daily / 4 weekly / 6 monthly), weekly check
+  repo_watch.py             repo + security + uptime report: GitHub/Forgejo inventory and CI, Dependabot/code/secret
+                            scanning, osv-scanner + gitleaks on shallow clones, Uptime Kuma 7-day uptime
+  repo_watch_weekly.py      cron wrappers (cron can't pass script arguments): full weekly report /
+  repo_watch_daily.py       daily alert that prints only when something is new or newly broken
   check_public.sh           privacy scan for this repo (not deployed)
 locales/en.yaml             string overlay (expired-approval footer that tells you what to type)
 systemd/                    gateway unit template, memory-limit drop-in, Uptime Kuma push timer + script
 config/backup.conf.example settings for backup_data.py (copy to $HERMES_HOME/backup.conf)
+config/repo_watch.example.json settings for repo_watch.py (copy to $HERMES_HOME/config/repo_watch.json)
 config/config.template.yaml only the settings that differ from Hermes defaults, with <PLACEHOLDERS>
 docs/                       GitHub Pages: index.html, privacy.html
-tests/                      vault, Google connector, cleanup and backup tests (plugin tests live next to each plugin)
+tests/                      vault, Google connector, cleanup, backup and repo_watch tests (plugin tests live next to each plugin)
 ```
 
 ## Install
@@ -108,6 +113,38 @@ Setup, on the Hermes host:
    (`restic restore latest --target /tmp/r --include '*/brain.db'`, then `PRAGMA integrity_check`).
 6. Cron: `hermes cron create "30 7 * * *" --name hermes-backup --script backup_data.py --no-agent
    --deliver <target> --failure-deliver <target>`.
+
+## Repo watch
+
+`scripts/repo_watch.py` is a script-only (no LLM) report on your code repos and services. Everything is
+driven by `$HERMES_HOME/config/repo_watch.json` (see `config/repo_watch.example.json`):
+
+- **Inventory:** GitHub repos of the configured owners (via `gh`) and Forgejo/Gitea repos (API token):
+  last push, open PRs/issues, latest Actions run per workflow on the default branch.
+- **Security:** GitHub Dependabot, code-scanning and secret-scanning alerts ("off" is reported with how to
+  enable). Repos without built-in alerts (Forgejo, or GitHub with alerts off when `local_scan.github` is
+  `"fallback"`) are shallow-cloned into `cache_dir` (unused clones pruned after `cache_prune_days`) and
+  scanned with [osv-scanner](https://github.com/google/osv-scanner) (dependency vulns) and
+  [gitleaks](https://github.com/gitleaks/gitleaks) (secrets in the last `commits` commits, redacted).
+  Install both official release binaries to `~/.local/bin`. Gitleaks hits stay listed until you add the
+  fingerprint to the repo's `.gitleaksignore` or a pattern to `ignore_findings`.
+- **Uptime:** Uptime Kuma monitor status and 7-day uptime per group, via the `uptime-kuma-api` package
+  (falls back to `/metrics`, status only).
+- **State:** findings, failing CI and down monitors with first-seen times, so the daily mode reports only
+  what is new. The first run records a baseline.
+
+Secrets are read from the environment first, then from `secret_command` + the secret name (e.g. the vault
+CLI). Setup:
+
+```bash
+uv venv $HERMES_HOME/venvs/repo-watch && uv pip install --python $HERMES_HOME/venvs/repo-watch/bin/python uptime-kuma-api
+cp config/repo_watch.example.json $HERMES_HOME/config/repo_watch.json   # then edit
+$HERMES_HOME/venvs/repo-watch/bin/python $HERMES_HOME/scripts/repo_watch.py --mode weekly --dry-run --verbose
+hermes cron create "0 13 * * 1" --name repo-watch-weekly --script repo_watch_weekly.py --no-agent \
+  --interpreter $HERMES_HOME/venvs/repo-watch/bin/python --deliver <target> --failure-deliver <target>
+hermes cron create "15 12 * * *" --name repo-watch-daily --script repo_watch_daily.py --no-agent \
+  --interpreter $HERMES_HOME/venvs/repo-watch/bin/python --deliver <target> --failure-deliver <target>
+```
 
 ## Google connector
 

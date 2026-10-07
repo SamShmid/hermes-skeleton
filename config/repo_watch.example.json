@@ -1,0 +1,42 @@
+{
+  "title": "Repo watch",
+  "github": {"enabled": true, "owners": ["<GITHUB_USER_OR_ORG>"], "include_archived": false, "include_forks": false},
+  "forgejo": {
+    "enabled": false,
+    "url": "https://git.example.com",
+    "token_var": "FORGEJO_TOKEN",
+    "include_archived": false,
+    "include_mirrors": false
+  },
+  "uptime_kuma": {
+    "enabled": false,
+    "url_var": "UPTIME_KUMA_URL",
+    "username_var": "UPTIME_KUMA_USERNAME",
+    "password_var": "UPTIME_KUMA_PASSWORD",
+    "ignore_monitors": [],
+    "degraded_below": 99.0,
+    "uptime_days": 7
+  },
+  "local_scan": {
+    "forgejo": true,
+    "github": "fallback",
+    "osv_scanner": "~/.local/bin/osv-scanner",
+    "gitleaks": "~/.local/bin/gitleaks",
+    "commits": 100,
+    "max_repo_mb": 500,
+    "workers": 3,
+    "timeout_s": 600
+  },
+  "secret_command": ["~/.hermes/vault/.venv/bin/python", "~/.hermes/vault/vault_mcp.py", "get"],
+  "cache_dir": "~/.cache/repo_watch",
+  "cache_prune_days": 30,
+  "state_path": "~/.hermes/state/repo_watch.json",
+  "ignore_repos": [],
+  "ignore_findings": [],
+  "severity_threshold": "medium",
+  "alert_severity": "high",
+  "active_days": 30,
+  "stale_days": 180,
+  "max_items": 8,
+  "message_limit": 1900
+}
