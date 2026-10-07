@@ -1,0 +1,15 @@
+[Unit]
+Description=Hermes Google sign-in return page (127.0.0.1:8791; publish with: tailscale serve --bg --https=443 --set-path /oauth/google http://127.0.0.1:8791/oauth/google)
+After=network-online.target
+
+[Service]
+# Set to https://<your-host>.<your-tailnet>.ts.net/oauth/google and register it as the OAuth client's redirect URI
+Environment=GOOGLE_REDIRECT_URI=<GOOGLE_REDIRECT_URI>
+Environment=GOOGLE_DEFAULT_TZ=<TIMEZONE>
+ExecStart=%h/.hermes/vault/.venv/bin/python %h/.hermes/vault/oauth_callback.py
+Restart=always
+RestartSec=5
+MemoryMax=200M
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,6 @@
+name: google-notify
+version: "0.1.0"
+description: "Tells the chat that started a Google sign-in whether it connected or failed (via the sign-in return page)."
+author: "SamShmid"
+provides_hooks:
+  - post_tool_call
