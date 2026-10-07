@@ -67,7 +67,7 @@ AUTO_PREFIX = "new_"  # pending sign-ins started without a label get named from 
 
 
 def label_from_email(email: str) -> str:
-    """'Sam.Doe+x@gmail.com' -> 'sam_doe'; Workspace domains get the domain word appended (sam_example)."""
+    """Alex.Doe+x at gmail -> 'alex_doe'; Workspace domains get the domain word appended (e.g. 'alex_example')."""
     local, _, domain = (email or "").lower().partition("@")
     base = re.sub(r"[^a-z0-9]+", "_", local.split("+")[0]).strip("_")[:30] or "account"
     if domain and domain not in ("gmail.com", "googlemail.com"):

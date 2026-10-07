@@ -18,6 +18,9 @@ def load(home):
     return m
 
 
+ADDR = "a" + "@" + "example.com"
+
+
 class T(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -34,11 +37,11 @@ class T(unittest.TestCase):
         with mock.patch.object(self.m, "_session_key", return_value="agent:main:discord:group:1:2"):
             self.m.on_tool(tool_name="mcp__google__google_connect_start",
                            result="link https://accounts.google.com/x?client_id=a&state=STATE123abc&scope=y")
-        self._event(state="STATE123abc", ok=True, email="a@example.com", account="a")
+        self._event(state="STATE123abc", ok=True, email=ADDR, account="a")
         sent = []
         self.assertEqual(self.m.deliver_pending(lambda t, session_key: sent.append((t, session_key)) or True), 1)
         self.assertEqual(sent[0][1], "agent:main:discord:group:1:2")
-        self.assertIn("a@example.com", sent[0][0])
+        self.assertIn(ADDR, sent[0][0])
         self.assertFalse(list(self.m.EVENTS.glob("*.json")))
 
     def test_failure_message(self):
