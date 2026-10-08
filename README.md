@@ -47,19 +47,23 @@ scripts/                    deployed to $HERMES_HOME/scripts (only *.py)
   repo_watch_daily.py       daily alert that prints only when something is new or newly broken
   calendly_watch.py         every 15 min: one line per new Calendly booking or cancellation (silent otherwise)
   research_digest.py        ~5 new papers + ~5 news stories matching your interests, one "why it matters" line each
+  code_task.py              hand a coding job to Codex / Claude Code in a disposable sandbox, get a PR back
   check_public.sh           privacy scan for this repo (not deployed)
 bridge/
   hermes_bridge_mcp.py      stdio MCP server so Claude Code, the Claude desktop app and Codex can talk to Hermes
   test_client.py            tiny MCP client for trying the bridge from a terminal
   config.example.json       bridge settings (URL, owner name, Keychain item)
+sandbox/setup_sandbox.sh    provision the coding-agent sandbox container (Node 22, uv, Docker, Codex, Claude Code, user agent)
+skills/software-development/code-handoff/SKILL.md   tells the agent how to run code_task.py (copy to $HERMES_HOME/skills/...)
 locales/en.yaml             string overlay (expired-approval footer that tells you what to type)
 systemd/                    gateway unit template, memory-limit drop-in, Uptime Kuma push timer + script
 config/backup.conf.example settings for backup_data.py (copy to $HERMES_HOME/backup.conf)
 config/repo_watch.example.json settings for repo_watch.py (copy to $HERMES_HOME/config/repo_watch.json)
 config/research_interests.example.json interests for research_digest.py (copy to $HERMES_HOME/config/research_interests.json)
+config/code_task.example.json settings for code_task.py (copy to $HERMES_HOME/config/code_task.json)
 config/config.template.yaml only the settings that differ from Hermes defaults, with <PLACEHOLDERS>
 docs/                       GitHub Pages: index.html, privacy.html
-tests/                      vault, Google and Calendly connectors, cleanup, backup, repo_watch and research_digest tests (plugin tests live next to each plugin)
+tests/                      vault, Google and Calendly connectors, cleanup, backup, repo_watch, research_digest and code_task tests (plugin tests live next to each plugin)
 ```
 
 ## Install
@@ -153,6 +157,67 @@ hermes cron create "0 13 * * 1" --name repo-watch-weekly --script repo_watch_wee
 hermes cron create "15 12 * * *" --name repo-watch-daily --script repo_watch_daily.py --no-agent \
   --interpreter $HERMES_HOME/venvs/repo-watch/bin/python --deliver <target> --failure-deliver <target>
 ```
+
+## Coding-agent sandbox (code_task.py)
+
+`scripts/code_task.py` lets the agent hand a coding job to [Codex CLI](https://github.com/openai/codex)
+(or Claude Code) and get a pull request back, without the coding agent ever holding git credentials:
+
+1. Hermes clones the repo locally (Forgejo/Gitea token or `gh auth token`, passed to git only through
+   `GIT_CONFIG_*` environment variables, so never in `.git/config` or the process list) and creates
+   `hermes/<slug>-<yyyymmdd>`.
+2. It rsyncs the checkout to a **sandbox** over LAN SSH and runs the agent there non-interactively
+   (`codex exec ... -` with the prompt on stdin) under a hard `timeout`, streaming the log back.
+3. It rsyncs the working tree back (never `.git`, no symlinks leaving the tree, `.gitignore` honoured,
+   files over 20 MB skipped), takes `HERMES_SUMMARY.md` out of the tree as the PR description, scans the
+   staged diff with gitleaks (a hit blocks the push), commits with hooks disabled, pushes the new branch
+   (never the base branch, never `--force`) and opens a PR via the Forgejo API or `gh pr create`. It never merges.
+4. It deletes the job dir on the sandbox and keeps `job.json`, `agent.log`, the summary, PR body and
+   `diff.patch` in `$HERMES_HOME/code_tasks/<job-id>/`. The last stdout line is
+   `CODE_TASK_RESULT status=... job=... pr=... branch=... note=...`.
+
+```bash
+code_task.py run --repo owner/name --task @task.md [--agent codex|claude|dummy] [--base main] [--timeout 1800] [--no-push]
+code_task.py status <job-id>
+code_task.py list
+```
+
+`--agent dummy` is a built-in fake agent (writes a file and a summary) for testing the whole pipeline
+without a model login; `tests/test_code_task.py` runs it against a local bare repo with a local-directory
+sandbox (`"sandbox": "local:/dir"`).
+
+**Sandbox setup** (example: an unprivileged Proxmox LXC; any small Ubuntu 24.04 VM works):
+
+```bash
+# on the Proxmox host
+pct create <CTID> local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst --hostname sandbox \
+  --unprivileged 1 --features nesting=1,keyctl=1 --cores 4 --memory 6144 --swap 2048 \
+  --rootfs local-lvm:40 --net0 name=eth0,bridge=vmbr0,firewall=1,gw=<GW>,ip=<SANDBOX_IP>/24,type=veth \
+  --onboot 1 --description "Disposable coding-agent sandbox; holds no secrets at rest"
+pct start <CTID>
+# on the Hermes host
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/sandbox_ed25519
+# copy sandbox/setup_sandbox.sh into the container and run it as root:
+pct push <CTID> sandbox/setup_sandbox.sh /root/setup_sandbox.sh
+pct exec <CTID> -- bash /root/setup_sandbox.sh "<contents of ~/.ssh/sandbox_ed25519.pub>" <HERMES_IP>
+# log the coding agent in once (device code flow; the token then lives on the sandbox only)
+pct exec <CTID> -- su - agent -c "codex login --device-auth"
+```
+
+Then on the Hermes host: add a `Host sandbox` block to `~/.ssh/config` (HostName, `User agent`,
+`IdentityFile ~/.ssh/sandbox_ed25519`, `IdentitiesOnly yes`, `BatchMode yes`), pin its host key
+(`ssh-keyscan` and compare the fingerprint with `pct exec <CTID> -- ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`),
+copy `config/code_task.example.json` to `$HERMES_HOME/config/code_task.json`, and copy
+`skills/software-development/code-handoff/` to `$HERMES_HOME/skills/software-development/`. The agent runs
+jobs with the terminal tool in the background with completion notification, as the skill describes.
+
+Security model: the sandbox is the isolation boundary, so Codex runs with its own sandbox bypassed
+(`--dangerously-bypass-approvals-and-sandbox`; Codex's bubblewrap/landlock sandbox does not work in an
+unprivileged container and would block the network test suites need). It has internet egress but no
+forge credentials, no VPN/tailnet membership and only one authorized SSH key (restricted to the Hermes
+host's IP). The coding agent's own login token is the one secret on it. Recommended extra hardening: a
+per-guest firewall that blocks the sandbox from the LAN except DNS, and allows inbound SSH only from the
+Hermes host. Destroying and recreating the sandbox loses nothing but that login.
 
 ## Research digest
 

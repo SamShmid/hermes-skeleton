@@ -1,0 +1,11 @@
+{
+  "sandbox": "sandbox",
+  "sandbox_jobs_dir": "jobs",
+  "secret_command": ["<HERMES_HOME>/vault/.venv/bin/python", "<HERMES_HOME>/vault/vault_mcp.py", "get"],
+  "forgejo": {"url": "https://<GIT_HOST>", "token_var": "FORGEJO_TOKEN"},
+  "github": {"token_command": ["gh", "auth", "token"]},
+  "author_email": "hermes@localhost",
+  "branch_prefix": "hermes/",
+  "default_timeout": 1800,
+  "gitleaks": "auto"
+}
