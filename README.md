@@ -48,6 +48,10 @@ scripts/                    deployed to $HERMES_HOME/scripts (only *.py)
   calendly_watch.py         every 15 min: one line per new Calendly booking or cancellation (silent otherwise)
   research_digest.py        ~5 new papers + ~5 news stories matching your interests, one "why it matters" line each
   check_public.sh           privacy scan for this repo (not deployed)
+bridge/
+  hermes_bridge_mcp.py      stdio MCP server so Claude Code, the Claude desktop app and Codex can talk to Hermes
+  test_client.py            tiny MCP client for trying the bridge from a terminal
+  config.example.json       bridge settings (URL, owner name, Keychain item)
 locales/en.yaml             string overlay (expired-approval footer that tells you what to type)
 systemd/                    gateway unit template, memory-limit drop-in, Uptime Kuma push timer + script
 config/backup.conf.example settings for backup_data.py (copy to $HERMES_HOME/backup.conf)
@@ -262,6 +266,75 @@ hermes cron create "*/15 * * * *" "Calendly bookings watch" --name calendly-watc
 
 If Calendly is connected to a Google calendar, bookings also show up there as ordinary calendar events,
 so a calendar-based briefing lists them once without asking Calendly.
+
+## Bridge: Claude Code, Claude desktop, Codex
+
+`bridge/hermes_bridge_mcp.py` is a small stdio MCP server that runs on your own computer and lets other
+agents talk to Hermes, for example "ask Hermes what is on my calendar tomorrow" from Claude Code.
+
+| tool | what it does |
+|---|---|
+| `ask_hermes(message, conversation)` | sends a message and returns Hermes's reply (streams; waits up to `timeout`, default 10 min) |
+| `hermes_continue(turn_id, approval)` | answers an approval request, or keeps waiting on a long turn |
+| `new_hermes_conversation(conversation)` | starts that conversation fresh (long-term memory is unaffected) |
+| `hermes_status()` | health, version, platforms, model, the client's conversations |
+
+**How it talks to Hermes.** Hermes's built-in API server, `POST /v1/chat/completions` with `stream: true` and
+the `X-Hermes-Session-Id` header. With that header Hermes loads the conversation from its own session
+database, so the bridge sends only the new message, history survives gateway restarts, and context
+compression is handled server-side (the bridge follows the rotated session id). Each conversation name maps
+to one session id in `state.json`; give every client its own name (`HERMES_BRIDGE_CONVERSATION`) so Claude
+Code and Codex do not share a thread. `X-Hermes-Session-Key: bridge:<name>` gives memory providers a stable
+scope. (`/v1/responses` with `conversation` also chains, but its store keeps only the last 100 responses.)
+
+**Approvals.** When Hermes wants to run a flagged command, the stream carries an `approval.request` event.
+If the client supports MCP elicitation, the bridge asks you directly (once / session / deny). Otherwise
+`ask_hermes` returns `APPROVAL NEEDED (turn_id=...)` and the calling agent must ask you and pass your answer to
+`hermes_continue`; the tool descriptions forbid approving on your behalf. If the bridge exits first, Hermes
+withdraws the request and the command does not run. Clarify questions are not available over the API.
+
+**Setup.**
+
+1. Hermes host: add the `API_SERVER_*` lines from `config/config.template.yaml` to `$HERMES_HOME/.env`, add
+   `platform_toolsets.api_server`, restart the gateway. Publish it on the tailnet only:
+   `sudo tailscale serve --bg --https=8642 http://127.0.0.1:8642`.
+2. Your computer:
+
+   ```bash
+   mkdir -p ~/hermes-bridge && cp bridge/hermes_bridge_mcp.py ~/hermes-bridge/
+   cp bridge/config.example.json ~/hermes-bridge/config.json      # then edit url/owner/about
+   uv venv ~/hermes-bridge/.venv && uv pip install --python ~/hermes-bridge/.venv/bin/python -r bridge/requirements.txt
+   # key into the macOS Keychain without echoing it (or set HERMES_API_KEY in the client's env)
+   security add-generic-password -a hermes-bridge -s hermes-api-key -U -w "$(ssh <hermes-host> 'grep ^API_SERVER_KEY= ~/.hermes/.env | cut -d= -f2-')"
+   ~/hermes-bridge/.venv/bin/python ~/hermes-bridge/hermes_bridge_mcp.py --check
+   ```
+
+3. Register it:
+
+   - Claude Code:
+     `claude mcp add --scope user hermes -e HERMES_BRIDGE_CONVERSATION=claude-code -e "HERMES_BRIDGE_CLIENT=Claude Code" -- ~/hermes-bridge/.venv/bin/python ~/hermes-bridge/hermes_bridge_mcp.py`
+   - Claude desktop: in `~/Library/Application Support/Claude/claude_desktop_config.json` add
+     `"mcpServers": {"hermes": {"command": "<home>/hermes-bridge/.venv/bin/python", "args": ["<home>/hermes-bridge/hermes_bridge_mcp.py"], "env": {"HERMES_BRIDGE_CONVERSATION": "claude-desktop"}}}`
+     and restart the app.
+   - Codex (`~/.codex/config.toml`); raise the tool timeout, Codex's default is 60 s:
+
+     ```toml
+     [mcp_servers.hermes]
+     command = "<home>/hermes-bridge/.venv/bin/python"
+     args = ["<home>/hermes-bridge/hermes_bridge_mcp.py"]
+     tool_timeout_sec = 900
+
+     [mcp_servers.hermes.env]
+     HERMES_BRIDGE_CONVERSATION = "codex"
+     ```
+
+Try it: `~/hermes-bridge/.venv/bin/python bridge/test_client.py ask "what's on my calendar tomorrow? one line"`.
+Tests: `BRIDGE_PYTHON=~/hermes-bridge/.venv/bin/python bin/test.sh`.
+
+**Security.** The API server can do anything Hermes can, including shell commands, so the key is the
+whole boundary: keep it in the Keychain (or the client's env), keep `API_SERVER_HOST=127.0.0.1`, and publish
+it only with `tailscale serve` (never `funnel`). Rotate by changing `API_SERVER_KEY`, restarting the gateway
+and updating the Keychain item.
 
 ## Stable updates
 

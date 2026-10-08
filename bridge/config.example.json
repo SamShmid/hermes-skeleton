@@ -1,0 +1,8 @@
+{
+  "url": "https://<HERMES_TAILNET_HOSTNAME>:8642",
+  "owner": "<OWNER_NAME>",
+  "about": "Hermes is <OWNER_NAME>'s personal assistant agent, running on their home server. It has long-term memory, a task list, Google (Gmail, Drive, Calendar), a password vault, shell access to the home lab, web search and scheduled cron jobs.",
+  "keychain_service": "hermes-api-key",
+  "keychain_account": "hermes-bridge",
+  "timeout": 600
+}

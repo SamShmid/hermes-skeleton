@@ -176,4 +176,17 @@ platform_toolsets:
   cli:      [browser, clarify, code_execution, cronjob, delegation, file, memory, session_search, skills, terminal, todo, vision, web]
   telegram: [browser, clarify, code_execution, cronjob, delegation, file, memory, session_search, skills, terminal, todo, vision, web]
   discord:  [browser, clarify, code_execution, cronjob, delegation, discord, discord_admin, file, memory, session_search, skills, terminal, todo, vision, web]
+  # API server (used by bridge/hermes_bridge_mcp.py): same tools as the chat platforms minus clarify,
+  # which nobody can answer over HTTP. MCP servers are added automatically when none are listed here.
+  api_server: [browser, code_execution, cronjob, delegation, file, memory, session_search, skills, terminal, todo, vision, web]
+
+# --- API server (for the Claude Code / Claude desktop / Codex bridge) ---------
+# The API server is configured in $HERMES_HOME/.env, not here (keep the key out of config.yaml):
+#   API_SERVER_ENABLED=true
+#   API_SERVER_HOST=127.0.0.1          # loopback only; publish with `tailscale serve`, never 0.0.0.0
+#   API_SERVER_PORT=8642
+#   API_SERVER_KEY=<RANDOM_KEY>        # e.g. python3 -c "import secrets;print(secrets.token_urlsafe(40))"
+# gateway.api_server.max_concurrent_runs (default 10) caps parallel runs.
+# Approvals: streamed turns carry approval.request events that the bridge relays to you;
+# non-streaming API calls fall back to approvals.unattended_mode (deny).
 # Also consider plugins.disabled: [platforms/whatsapp] if you do not use WhatsApp.

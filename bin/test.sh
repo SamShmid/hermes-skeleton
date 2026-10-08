@@ -26,6 +26,13 @@ cd "$REPO_ROOT"
 suite approval-expiry-notice "$PY" -m unittest discover -s plugins/approval-expiry-notice/tests -v
 suite quiet-background "$PY" -m unittest discover -s plugins/quiet-background/tests -v
 suite repo-tests "$PY" -m unittest discover -s tests -v
+# Bridge (MCP client side): needs `mcp` and `httpx`; set BRIDGE_PYTHON to the bridge venv's python.
+BPY="${BRIDGE_PYTHON:-$PY}"
+if "$BPY" -c "import mcp, httpx" 2>/dev/null; then
+    suite bridge "$BPY" -m unittest discover -s bridge/tests -v
+else
+    echo "=== bridge: SKIPPED (no mcp/httpx in $BPY; set BRIDGE_PYTHON)"
+fi
 
 if [ -x "$HERMES" ]; then
     for p in brain topic-router; do
