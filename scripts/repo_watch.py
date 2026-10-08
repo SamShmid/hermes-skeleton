@@ -291,11 +291,16 @@ def parse_dependabot(alerts: list[dict], repo: str) -> list[dict]:
         pkg = (vuln.get("package") or {}).get("name") or (a.get("dependency") or {}).get("package", {}).get("name", "?")
         sev = normalize_severity(vuln.get("severity") or adv.get("severity"))
         aliases = [adv.get("ghsa_id"), adv.get("cve_id")]
-        out.append({
+        rec = {
             "id": f"dependabot:{repo}:{a.get('number')}", "repo": repo, "source": "dependabot",
             "severity": sev, "title": dependabot_title(pkg, adv.get("summary") or adv.get("ghsa_id") or ""),
             "aliases": [x for x in aliases if x], "url": a.get("html_url", ""),
-        })
+        }
+        patched = (vuln.get("first_patched_version") or {}).get("identifier")
+        if patched:
+            eco = (vuln.get("package") or {}).get("ecosystem", "")
+            rec["fix"] = fix_command({"pip": "pypi"}.get(eco, eco), pkg, patched)
+        out.append(rec)
     return out
 
 
@@ -319,6 +324,47 @@ def parse_secret_scanning(alerts: list[dict], repo: str) -> list[dict]:
         "severity": "high", "title": a.get("secret_type_display_name") or a.get("secret_type") or "secret",
         "aliases": [], "url": a.get("html_url", ""),
     } for a in alerts]
+
+
+def _vkey(v: str) -> tuple:
+    """Loose version sort key: numeric parts compare as numbers (1.10.0 > 1.9.2)."""
+    import re as _re
+    return tuple((0, int(x)) if x.isdigit() else (1, x) for x in _re.split(r"[.\-+_]", (v or "").lstrip("v")) if x)
+
+
+def pick_fix(current: str, fixed: list[str]) -> str:
+    """Smallest fixed version above `current`, preferring the same major line."""
+    cur = _vkey(current)
+    above = sorted({f for f in fixed if f and _vkey(f) > cur}, key=_vkey)
+    if not above:
+        return ""
+    same = [f for f in above if _vkey(f)[:1] == cur[:1]]
+    return (same or above)[0]
+
+
+def fix_command(eco: str, name: str, version: str) -> str:
+    e = (eco or "").lower()
+    if e == "npm":
+        return f"npm install {name}@{version}"
+    if e == "pypi":
+        return f"uv pip install \"{name}>={version}\""
+    if e == "go":
+        return f"go get {name}@v{version.lstrip('v')}"
+    if e == "crates.io":
+        return f"cargo update -p {name} --precise {version}"
+    if e == "rubygems":
+        return f"bundle update {name}"
+    return f"upgrade {name} to {version}"
+
+
+def osv_fixed_versions(vuln: dict, name: str) -> list[str]:
+    out = []
+    for aff in vuln.get("affected") or []:
+        if (aff.get("package") or {}).get("name", "").lower() != name.lower():
+            continue
+        for r in aff.get("ranges") or []:
+            out += [ev["fixed"] for ev in r.get("events") or [] if ev.get("fixed")]
+    return out
 
 
 def parse_osv(data: dict, repo: str, root: str = "") -> list[dict]:
@@ -347,13 +393,19 @@ def parse_osv(data: dict, repo: str, root: str = "") -> list[dict]:
                             sev = s
                 primary = sorted(ids, key=lambda i: (not i.startswith("GHSA"), not i.startswith("CVE"), i))[0]
                 summary = ""
+                fixed = []
                 for vid in ids:
                     summary = (vulns.get(vid) or {}).get("summary") or summary
-                out.append({
+                    fixed += osv_fixed_versions(vulns.get(vid) or {}, name)
+                fix_v = pick_fix(ver, fixed)
+                rec = {
                     "id": f"osv:{repo}:{eco}/{name}@{ver}:{primary}", "repo": repo, "source": "osv",
                     "severity": sev, "title": f"{name} {ver} {primary}" + (f" ({src})" if src else ""),
                     "aliases": aliases, "summary": summary[:120], "url": f"https://osv.dev/{primary}",
-                })
+                }
+                if fix_v:
+                    rec["fix"] = fix_command(eco, name, fix_v)
+                out.append(rec)
     return out
 
 
@@ -895,7 +947,7 @@ def update_state(prev: dict | None, rep: dict, cfg: dict, now: dt.datetime) -> t
 
     findings = {}
     for fid, f in current.items():
-        keep_keys = ("repo", "source", "severity", "title", "aliases", "url", "fingerprint", "summary")
+        keep_keys = ("repo", "source", "severity", "title", "aliases", "url", "fingerprint", "summary", "fix")
         rec = {k: f[k] for k in keep_keys if f.get(k) not in (None, "", [])}
         rec["first_seen"] = old_f.get(fid, {}).get("first_seen", ts)
         findings[fid] = rec
@@ -999,7 +1051,10 @@ def finding_line(f: dict, new: bool) -> str:
     tag = "🆕 " if new else ""
     src = {"dependabot": "dependabot", "code-scanning": "code scan", "secret-scanning": "secret scan",
            "osv": "osv", "gitleaks": "gitleaks"}.get(f.get("source"), f.get("source", ""))
-    return f"- {tag}{SEV_EMOJI.get(sev, '🟡')} `{short(f['repo'])}` {esc(clip(f.get('title', ''), 70))} _({src})_"
+    line = f"- {tag}{SEV_EMOJI.get(sev, '🟡')} `{short(f['repo'])}` {esc(clip(f.get('title', ''), 70))} _({src})_"
+    if f.get("fix"):
+        line += f"\n  ↳ fix: `{clip(f['fix'], 80)}`"
+    return line
 
 
 SECRET_SOURCES = ("gitleaks", "secret-scanning")

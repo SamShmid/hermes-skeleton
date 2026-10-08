@@ -304,5 +304,32 @@ class RenderTests(unittest.TestCase):
             self.assertLess(len(line), 300)
 
 
+
+class FixLineTests(unittest.TestCase):
+    def test_pick_fix_prefers_same_major(self):
+        self.assertEqual(rw.pick_fix("5.0.7", ["1.1.12", "2.0.3", "5.0.8", "6.0.1"]), "5.0.8")
+        self.assertEqual(rw.pick_fix("1.9.0", ["1.10.0", "2.0.0"]), "1.10.0")
+        self.assertEqual(rw.pick_fix("3.0.0", ["2.0.0"]), "")
+
+    def test_fix_commands(self):
+        self.assertEqual(rw.fix_command("npm", "braces", "3.0.4"), "npm install braces@3.0.4")
+        self.assertEqual(rw.fix_command("PyPI", "requests", "2.32.4"), 'uv pip install "requests>=2.32.4"')
+        self.assertEqual(rw.fix_command("Go", "golang.org/x/net", "0.38.0"), "go get golang.org/x/net@v0.38.0")
+
+    def test_osv_finding_gets_fix_and_line_shows_it(self):
+        data = {"results": [{"source": {"path": "/r/package-lock.json"}, "packages": [{
+            "package": {"name": "braces", "version": "3.0.2", "ecosystem": "npm"},
+            "vulnerabilities": [{"id": "GHSA-x", "summary": "ReDoS", "affected": [{
+                "package": {"name": "braces", "ecosystem": "npm"},
+                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "3.0.3"}]}]}]}],
+            "groups": [{"ids": ["GHSA-x"], "max_severity": "7.5"}]}]}]}
+        f = rw.parse_osv(data, "fj/sam/x", root="/r")[0]
+        self.assertEqual(f["fix"], "npm install braces@3.0.3")
+        self.assertIn("↳ fix: `npm install braces@3.0.3`", rw.finding_line(f, False))
+
+    def test_no_fix_when_unknown(self):
+        f = {"repo": "fj/sam/x", "source": "gitleaks", "severity": "high", "title": "aws-key in a.py"}
+        self.assertNotIn("fix:", rw.finding_line(f, False))
+
 if __name__ == "__main__":
     unittest.main()

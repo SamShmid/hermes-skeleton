@@ -1,0 +1,5 @@
+name: sofos-tasks
+version: 0.1.0
+description: "/todo command: the owner's Sofos task digest and lists, via the sofos MCP connector (vault venv)."
+author: hermes-skeleton
+kind: standalone

@@ -32,6 +32,7 @@ vault/
   vault_mcp.py              password vault MCP server (Fernet-encrypted SQLite; the agent uses secrets without seeing them)
   google_mcp.py             Google connector MCP server: several accounts, Gmail read/filters, Drive, Calendar, Docs, Sheets
   calendly_mcp.py           Calendly connector MCP server: links, upcoming bookings, changes, availability, one-time links
+  sofos_mcp.py              Sofos task connector MCP server: overview, list, add, edit, complete, reopen, briefing
   requirements.txt          mcp<2, cryptography, google-auth, google-api-python-client (the vault's own venv)
 scripts/                    deployed to $HERMES_HOME/scripts (only *.py)
   brain_cli.py              bulk import / search / one pipeline pass
@@ -63,7 +64,7 @@ config/research_interests.example.json interests for research_digest.py (copy to
 config/code_task.example.json settings for code_task.py (copy to $HERMES_HOME/config/code_task.json)
 config/config.template.yaml only the settings that differ from Hermes defaults, with <PLACEHOLDERS>
 docs/                       GitHub Pages: index.html, privacy.html
-tests/                      vault, Google and Calendly connectors, cleanup, backup, repo_watch, research_digest and code_task tests (plugin tests live next to each plugin)
+tests/                      vault, Google, Calendly and Sofos connectors, cleanup, backup, repo_watch, research_digest and code_task tests (plugin tests live next to each plugin)
 ```
 
 ## Install
@@ -294,6 +295,32 @@ The same flow is available from a shell:
 `google_mcp.py connect-start work`, `google_mcp.py connect-finish work '<address>'` (or `-` to read it from
 stdin), `google_mcp.py accounts`, and `google_mcp.py test work` (one harmless read per API).
 `google_disconnect` revokes the token at Google and deletes it from the vault.
+
+## Sofos connector (tasks)
+
+`vault/sofos_mcp.py` connects Hermes to a self-hosted Sofos task and project app (workspaces, nested
+projects, nested tasks). Hermes logs in as **its own agent account**: register one with
+`POST /api/auth/register {"username": "hermes", "password": ..., "isAgent": true}`, store the password with
+`vault_mcp.py set SOFOS_HERMES_PASSWORD --service sofos`, then share your account with the agent's `SF-` code
+as **writer** in Sofos Settings and accept the invite as the agent. The password is read in code and never
+printed; the connector re-logs in when its session expires.
+
+| Tool | What it does |
+|---|---|
+| `sofos_overview` | every workspace and project (nested) with ids and open-task counts |
+| `sofos_tasks(view, where, query)` | views `open`, `overdue`, `today`, `week`, `dated`, `done`, `all`; `where` = name, path like `Work/Client`, or id |
+| `sofos_add_task(title, where, due, priority, notes, parent_task_id)` | empty `where` = the Home workspace; due `YYYY-MM-DD` (all-day) or `YYYY-MM-DD HH:MM` (local time) |
+| `sofos_update_task(task_id, ...)` | change title, due (`none` clears), priority, notes, status, or move it |
+| `sofos_complete_task(task_id, include_subtasks)` | Sofos refuses a parent with open subtasks; the tool tells Hermes to ask first |
+| `sofos_reopen_task(task_id)` | reopen (Sofos also reopens completed parents) |
+| `sofos_briefing` | overdue, today, next 7 days, undated high priority |
+
+No deletes. Environment: `SOFOS_URL` (default `http://localhost:3000`), `SOFOS_USER` (default `hermes`),
+`SOFOS_TZ`, `SOFOS_PASSWORD_NAME`. CLI: `sofos_mcp.py overview | tasks [view] [--where W] [--json] | briefing [--json]`.
+
+**`/todo` command:** `plugins/sofos-tasks` registers `/todo` (`/tasks` is a built-in alias of `/agents`):
+`/todo` (digest), `/todo <view> [where]`, `/todo find <words>`. It runs the CLI in the vault venv, so the
+password never enters the gateway process. Enable it under `plugins.enabled`.
 
 ## Calendly connector
 

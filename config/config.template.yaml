@@ -169,6 +169,15 @@ mcp_servers:
     env:
       VAULT_OWNER_NAME: <OWNER_NAME>
       CALENDLY_TZ: <TIMEZONE>           # display timezone; default = the Calendly account's timezone
+  sofos:                               # needs the agent account password in the vault as SOFOS_HERMES_PASSWORD
+    command: <HERMES_HOME>/vault/.venv/bin/python
+    args: [<HERMES_HOME>/vault/sofos_mcp.py, serve]
+    connect_timeout: 30.0
+    enabled: true
+    env:
+      VAULT_OWNER_NAME: <OWNER_NAME>
+      SOFOS_URL: <SOFOS_URL>            # e.g. https://sofos.example.ts.net
+      SOFOS_TZ: <TIMEZONE>
 
 # --- toolset trims: drop toolsets that are unused or unavailable --------------
 # Removed from every platform: image_gen, video, video_gen, tts, connections, computer_use.
