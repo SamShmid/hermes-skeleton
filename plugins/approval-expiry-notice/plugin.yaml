@@ -5,3 +5,4 @@ author: hermes-skeleton
 provides_hooks:
   - pre_approval_request
   - post_approval_response
+  - pre_gateway_dispatch

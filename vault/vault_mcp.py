@@ -117,6 +117,12 @@ def build_server(v=None):
     v = v or Vault()
     mcp = FastMCP("vault")
 
+    def _no_google(names):
+        bad = [n for n in names if str(n).upper().startswith(("GOOGLE_TOKEN_", "GOOGLE_PENDING_"))]
+        if bad:
+            raise ValueError("Google sign-ins are only usable through the google tools, not as raw "
+                             "secrets: " + ", ".join(bad))
+
     @mcp.tool()
     def vault_list(service: str = "") -> list:
         """List saved passwords/tokens (names, service, description; never values). Optional service filter."""
@@ -135,12 +141,14 @@ def build_server(v=None):
     def vault_use(names: list[str]) -> str:
         """Prepare secrets for a terminal command WITHOUT seeing them. Returns a temp env-file path (expires in 10
         minutes). Then run in the terminal: `set -a; . <path>; set +a; your-command "$NAME"`. Never print the values."""
+        _no_google(names)
         path = v.env_file(names)
         return (f"env file: {path} (expires in {ENV_FILE_TTL // 60} min). Use in ONE terminal command: "
                 f"set -a; . {path}; set +a; <command using \"${names[0].upper()}\"> ; rm -f {path}")
 
     @mcp.tool(description=f"Return a secret's actual value. Only when {OWNER} explicitly asks to see it.")
     def vault_reveal(name: str) -> str:
+        _no_google([name])
         return v.get(name)
 
     return mcp

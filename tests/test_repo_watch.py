@@ -295,13 +295,18 @@ class RenderTests(unittest.TestCase):
                              "uptime": 99.5 - i, "msg": "", "since": "2026-10-11 00:00"} for i in range(10)]}
         rep = report(repos, fs, ci={"gh/o/r1": {"CI": "failure"}}, monitors=mon)
         s, d = rw.update_state(None, rep, cfg(), NOW)
-        out = rw.render_weekly(rep, s, d, cfg(), NOW)
+        out = rw.render_weekly_full(rep, s, d, cfg(), NOW)  # the long report (--full)
         self.assertIn("🔑", out)
         self.assertIn("…and", out)
         self.assertIn("down since 2026-10-11 00:00", out)
         self.assertLess(len(out), 4000)   # at most two Discord messages
         for line in out.splitlines():
             self.assertLess(len(line), 300)
+        short = rw.render_weekly(rep, s, d, cfg(), NOW)  # the default: one total line + top repos with a fix
+        self.assertIn("Top 5 (worst first", short)
+        self.assertIn("rotate the secret", short)
+        self.assertIn("uptime 🔴 1 down", short)
+        self.assertLess(len(short), 2000)  # one Discord message
 
 
 

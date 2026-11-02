@@ -32,6 +32,7 @@ def worker_loop(store_factory, llm, stop, interval=60.0):
         try:
             store.index_wiki()
             busy = brain_pipeline.run_once(store, llm)
+            store.embed_missing()  # vectors for new/changed facts, wiki passages and chat notes (no-op if embedder is down)
             backoff = interval
         except Exception as exc:
             log.warning("brain worker pass failed: %s", exc)
@@ -42,7 +43,7 @@ def worker_loop(store_factory, llm, stop, interval=60.0):
 def _session(name):
     try:
         from gateway.session_context import get_session_env
-        return get_session_env(name)
+        return get_session_env(name) or ""
     except Exception:
         return ""
 
@@ -56,7 +57,7 @@ def register(ctx):
                          args_hint="[help | search <words> | forget <id> | projects]")
     ctx.register_command("project", lambda raw: cmd_project(
         Store.open(), raw, _session("HERMES_SESSION_KEY"), _session("HERMES_SESSION_ID"),
-        _session("HERMES_SESSION_CHAT_ID")), description="Show or set this chat project (try /project help)", args_hint="[name | none | help]")
+        _session("HERMES_SESSION_CHAT_ID"), _session("HERMES_SESSION_PARENT_CHAT_ID"), _session("HERMES_SESSION_CHAT_NAME")), description="Show or set this chat project (try /project help)", args_hint="[name | none | help]")
     if sys.argv[1:3] == ["gateway", "run"] and (_worker["thread"] is None or not _worker["thread"].is_alive()):
         from agent.memory_provider import spawn_context_thread
         _worker["stop"].clear()

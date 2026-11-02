@@ -2,6 +2,11 @@
 """Bulk API/CLI for the brain ($HERMES_HOME/brain/brain.db).
 
   brain_cli.py stats | search <query> | reindex-wiki | seed
+  brain_cli.py embed                               (backfill meaning-search vectors for facts, wiki, chat notes;
+                                                    needs the brain embedder daemon running)
+  brain_cli.py prefetch <message> [--project P]    (show what Hermes would auto-recall for a message)
+  brain_cli.py notes-backfill [--max N]            (chat summaries for past chats that have none yet; uses
+                                                    auxiliary.brain_extract)
   brain_cli.py add-fact --text "..." [--kind K --entity E --project P --source S]   (direct, no approval)
   brain_cli.py add-fact --json facts.json          (list of {text, kind?, entity?, project?, source?}; '-' = stdin)
   brain_cli.py add-candidate --json cands.json     (list of {text, kind?, entity?, project?, source?, action?,
@@ -50,12 +55,30 @@ def hermes_llm(task, system, user):
     return content or ""
 
 
+def _session_title(session_id) -> str:
+    """The chat's title from Hermes's session DB (read-only), "" if unknown."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{HOME / 'state.db'}?mode=ro", uri=True)
+        row = db.execute("SELECT title, display_name FROM sessions WHERE id=?", (session_id,)).fetchone()
+        db.close()
+        return ((row[0] or (row[1] or "").split(" / ")[-1]) if row else "")[:200]
+    except Exception:
+        return ""
+
+
 def main(argv=None, store=None):
     p = argparse.ArgumentParser(description="Brain bulk CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("stats")
     sub.add_parser("reindex-wiki")
     sub.add_parser("seed")
+    sub.add_parser("embed")
+    pf = sub.add_parser("prefetch")
+    pf.add_argument("query", nargs="+")
+    pf.add_argument("--project", default="")
+    nb = sub.add_parser("notes-backfill")
+    nb.add_argument("--max", type=int, default=50)
     s = sub.add_parser("search")
     s.add_argument("query", nargs="+")
     f = sub.add_parser("add-fact")
@@ -79,6 +102,29 @@ def main(argv=None, store=None):
         out = store.search(" ".join(a.query), limit=20)
     elif a.cmd == "reindex-wiki":
         out = {"indexed": store.index_wiki(HOME / "wiki", force=True)}
+    elif a.cmd == "embed":
+        store.index_wiki(HOME / "wiki", force=True)
+        if not store.embedder.available():
+            out = {"ok": False, "error": f"embedder not running (no socket at {store.embedder.sock})"}
+        else:
+            n, total = 1, 0
+            while n:  # in rounds so progress survives an interruption
+                n = store.embed_missing(max_items=256)
+                total += n
+            out = {"ok": True, "embedded": total, **store.stats()}
+    elif a.cmd == "notes-backfill":
+        done, failed = [], []
+        for r in store.q("SELECT DISTINCT session_id FROM chunks WHERE status='done' AND session_id NOT IN "
+                         "(SELECT session_id FROM notes) ORDER BY session_id")[:a.max]:
+            try:
+                if brain_pipeline.summarize_session(store, r["session_id"], hermes_llm, _session_title(r["session_id"])):
+                    done.append(r["session_id"])
+            except Exception as exc:
+                failed.append(f"{r['session_id']}: {exc}"[:200])
+        out = {"summarized": done, "failed": failed}
+    elif a.cmd == "prefetch":
+        print(store.prefetch(" ".join(a.query), a.project))
+        return None
     elif a.cmd == "seed":
         out = {"candidates": brain_pipeline.seed_from_memory_files(store, HOME / "memories")}
     elif a.cmd == "add-fact":

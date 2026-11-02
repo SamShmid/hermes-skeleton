@@ -9,6 +9,9 @@ DRY_RUN="${DRY_RUN:-0}"
 
 # Plugins/scripts this repo owns. Deploy never deletes anything else in $HERMES_HOME.
 SKELETON_PLUGINS=(brain brain-ops topic-router quiet-background approval-expiry-notice)
+# HERMES_SKELETON_KEEP_LOCAL=1 (update.sh --keep-local-plugins): leave the plugins, scripts, locales and
+# vault code already in $HERMES_HOME alone; only the systemd drop-ins are (re)installed.
+HERMES_SKELETON_KEEP_LOCAL="${HERMES_SKELETON_KEEP_LOCAL:-0}"
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
     _B=$'\033[1m' _G=$'\033[0;32m' _Y=$'\033[0;33m' _R=$'\033[0;31m' _D=$'\033[2m' _N=$'\033[0m'
@@ -87,6 +90,10 @@ install_file() {
 
 # deploy_skeleton: copy plugins, scripts, locales overlay and the vault server into $HERMES_HOME.
 deploy_skeleton() {
+    if [ "$HERMES_SKELETON_KEEP_LOCAL" = 1 ]; then
+        warn "keeping the local plugins, scripts, locales and vault code in $HERMES_HOME (HERMES_SKELETON_KEEP_LOCAL=1)"
+        return 0
+    fi
     say "Deploying skeleton files into $HERMES_HOME"
     local p
     for p in "${SKELETON_PLUGINS[@]}"; do

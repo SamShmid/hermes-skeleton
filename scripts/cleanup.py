@@ -2,7 +2,10 @@
 """Daily Hermes housekeeping. Meant for a script-only Hermes cron job (e.g. "hermes-cleanup", early morning).
 
 Conservative by design: it only touches things that are clearly Hermes-owned AND
-clearly stale, and it always prints a short report (the cron job delivers it to chat).
+clearly stale. Quiet by default (since 2026-11-01): the nightly run prints its report only when it
+freed more than $HERMES_CLEANUP_QUIET_MIN_MB (default 100) MB, stopped a process, hit an error or
+the disk warning fired; no output means the cron job posts nothing. --verbose and --dry-run always
+print (manual use).
 
 What it does
   Processes (owned by this user, older than the age limit, never protected ones):
@@ -60,6 +63,7 @@ DISK_WARN_PCT = 85
 BACKUPS_DIR = Path(os.environ.get("HERMES_CLEANUP_BACKUPS_DIR", HOME / "backups")).expanduser()
 BACKUPS_MAX_AGE_DAYS = int(os.environ.get("HERMES_CLEANUP_BACKUPS_DAYS", "30"))
 BACKUP_MARKER_MAX_AGE_H = 36
+QUIET_MIN_FREED = int(os.environ.get("HERMES_CLEANUP_QUIET_MIN_MB", "100")) * 1024 * 1024
 CACHE_DIRS = ["scratch", "terminal-output", "spillover", "partials", "exec"]
 TMP_PREFIXES = ("hermes", "agent-browser", "browser_harness", "browser-use", "tmp")
 PROTECTED_SERVICES = tuple(s for s in os.environ.get("HERMES_CLEANUP_PROTECTED_SERVICES", "hermes-gateway")
@@ -354,7 +358,7 @@ def disk_lines() -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Daily Hermes housekeeping (see module docstring).")
     ap.add_argument("--dry-run", action="store_true", help="Show what would be cleaned; change nothing")
-    ap.add_argument("--verbose", action="store_true", help="List every process and path")
+    ap.add_argument("--verbose", action="store_true", help="List every process and path; always print")
     args = ap.parse_args(argv)
     dry = args.dry_run
 
@@ -426,7 +430,8 @@ def main(argv: list[str] | None = None) -> int:
     if dry:
         lines.append(f"• Checkpoints: {human(tree_size_and_newest(HERMES / 'checkpoints')[0]) if (HERMES / 'checkpoints').exists() else '0 B'} "
                      "(the real run calls `hermes checkpoints prune`, 7 days / 500 MB)")
-    lines.extend(disk_lines())
+    disk = disk_lines()
+    lines.extend(disk)
     for err in errors[:5]:
         lines.append(f"⚠️ {err}")
     if args.verbose or dry:
@@ -444,6 +449,10 @@ def main(argv: list[str] | None = None) -> int:
             lines.append(f"  - pid {p['pid']} ({reason}, {p['age'] / 3600:.0f}h): {p['cmd'][:120]}")
         for group, path, size in removed:
             lines.append(f"  - [{group}] {path} ({human(size)})")
+    # Quiet nights post nothing: only a real cleanup, a stopped process, an error or a full disk is news.
+    noteworthy = total >= QUIET_MIN_FREED or bool(stopped) or bool(errors) or len(disk) > 1
+    if not (args.verbose or dry or noteworthy):
+        return 0
     print("\n".join(lines))
     return 0
 

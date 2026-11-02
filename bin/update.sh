@@ -2,13 +2,17 @@
 # Stable update: move Hermes to exactly the commit in HERMES_VERSION (never "latest main"), run
 # Hermes's own post-update steps, redeploy the skeleton files, restart the gateway, health-check.
 #
-#   bin/update.sh [--dry-run] [--sha SHA] [--no-restart] [--no-backup] [--force] [--hermes-home PATH]
+#   bin/update.sh [--dry-run] [--sha SHA] [--no-restart] [--no-backup] [--force] [--keep-local-plugins]
+#                 [--hermes-home PATH]
 #
 #   --sha SHA     try a candidate commit instead of the pin (test it, then make it the pin with
 #                 bin/bump-version.sh SHA). Roll back with: bin/update.sh  (re-pins HERMES_VERSION)
 #   --no-restart  leave the gateway stopped/running as it was; you restart it yourself
 #   --no-backup   skip the quick state snapshot (hermes backup --quick)
 #   --force       stash local edits in the Hermes checkout instead of refusing
+#   --keep-local-plugins  (or HERMES_SKELETON_KEEP_LOCAL=1) do not copy this repo's plugins, scripts,
+#                 locales or vault code over the ones in HERMES_HOME; systemd limits are still installed.
+#                 Use it when the live install has moved ahead of this repo.
 #
 # Why not `hermes update`: it always tracks upstream main. This script does the same phases
 # against a pinned commit: snapshot -> stop gateway -> fetch + detached checkout ->
@@ -25,13 +29,15 @@ while [ $# -gt 0 ]; do
         --no-restart) RESTART=0 ;;
         --no-backup) BACKUP=0 ;;
         --force) FORCE=1 ;;
+        --keep-local-plugins) HERMES_SKELETON_KEEP_LOCAL=1 ;;
         --hermes-home) HERMES_HOME="$2"; shift ;;
-        -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
     shift
 done
 export DRY_RUN="${DRY_RUN:-0}" HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}" FORCE
+export HERMES_SKELETON_KEEP_LOCAL="${HERMES_SKELETON_KEEP_LOCAL:-0}"
 # shellcheck source=bin/lib.sh
 . "$(dirname "$0")/lib.sh"
 AGENT_DIR="${HERMES_AGENT_DIR:-$HERMES_HOME/hermes-agent}"
