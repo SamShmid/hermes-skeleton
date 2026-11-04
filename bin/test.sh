@@ -24,6 +24,7 @@ suite() {  # suite NAME RUNNER... -- runs unittest discovery for a tests dir
 cd "$REPO_ROOT"
 # Plain-Python suites (stdlib; vault needs `cryptography`, skipped if absent).
 suite approval-expiry-notice "$PY" -m unittest discover -s plugins/approval-expiry-notice/tests -v
+suite email-send-gate "$PY" -m unittest discover -s plugins/email-send-gate/tests -v
 suite quiet-background "$PY" -m unittest discover -s plugins/quiet-background/tests -v
 suite repo-tests "$PY" -m unittest discover -s tests -v
 # Bridge (MCP client side): needs `mcp` and `httpx`; set BRIDGE_PYTHON to the bridge venv's python.

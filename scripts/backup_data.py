@@ -54,12 +54,12 @@ HERMES = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes")).expanduser
 DBS = [
     "state.db", "brain/brain.db", "vault/vault.db", "taskdb/tasks.sqlite3", "data/email-review.db",
     "kanban.db", "cron/executions.db", "cron/deliveries.db", "home-assistant-ops/home_ops.sqlite3",
-    "verification_evidence.db",
+    "verification_evidence.db", "mac-mirror/mirror.db",
 ]
 # Plain files and directories (relative to HERMES_HOME). Absent ones are skipped.
 PATHS = [
     "vault/vault.key", "google/client_secret.json", ".env", "auth.json", "config.yaml", "SOUL.md",
-    "memories", "cron/jobs.json", "wiki", "quarantine", "skills", "scripts", "plugins", "locales",
+    "memories", "cron/jobs.json", "wiki", "quarantine", "skills", "scripts", "plugins", "locales", "discord-archive",
 ]
 EXCLUDES = ["__pycache__", "*.pyc", ".venv", "node_modules", "*.db-wal", "*.db-shm", "*.lock"]
 

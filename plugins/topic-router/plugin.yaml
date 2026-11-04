@@ -25,3 +25,22 @@ config_schema:
       slot (provider / model / base_url), which follows Hermes's auxiliary
       default until pinned.
     default: {backend: llm, timeout_seconds: 120}
+  threadify_channels:
+    type: dict
+    description: >
+      Chats (subset of channels, Discord only) where a finished conversation is
+      moved into a thread when the router starts a new topic or on /new: the
+      first message gets a thread, the rest is copied there and deleted from
+      the channel. Needs Manage Messages + Create Public Threads.
+    default: {}
+  reply_channels:
+    type: dict
+    description: >
+      Chats (subset of channels, Discord only) where conversations live in replies: no threads,
+      dividers or "Same topic?" prompts. Replying to an earlier message reopens that conversation;
+      other messages are routed by the model silently. Overrides confirm_all / act_confirm there.
+    default: {}
+  owner_label:
+    type: str
+    description: Name shown on the owner's copied messages in threads.
+    default: Owner

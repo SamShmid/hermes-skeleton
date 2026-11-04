@@ -3,8 +3,10 @@ False (new topic) or None (unsure) works; sync or async. ``history`` is a list o
 ``{"role": "user"|"assistant", "content": str}``."""
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
+import os
 from typing import Any, Callable, List, Optional
 
 TASK = "topic_router"
@@ -71,6 +73,29 @@ class LlmDecider:
         return parse_verdict(result.text)
 
 
+class LocalModelDecider:
+    """The local fine-tuned model (topic_model_server.py, a systemd --user service) over its Unix socket.
+    Its own guard returns unsure below its confidence threshold, so the router asks the owner."""
+
+    def __init__(self, socket_path: str = "~/.hermes/topic-model/topic.sock", timeout: float = 10.0):
+        self.socket_path, self.timeout = os.path.expanduser(socket_path), timeout
+        self.last_info: Optional[dict] = None  # p_new + model ms of the latest decision, for the confirm prompt
+
+    async def decide(self, history: List[dict], message: str) -> Optional[bool]:
+        self.last_info = None
+        reader, writer = await asyncio.wait_for(asyncio.open_unix_connection(self.socket_path), self.timeout)
+        try:
+            writer.write((json.dumps({"context": history, "message": message}, ensure_ascii=False) + "\n").encode())
+            await writer.drain()
+            reply = json.loads(await asyncio.wait_for(reader.readline(), self.timeout))
+        finally:
+            writer.close()
+        if "error" in reply:
+            raise RuntimeError(f"topic model: {reply['error']}")
+        self.last_info = {"p_new": reply.get("p_new"), "model_ms": reply.get("ms")}
+        return {"continue": True, "new": False}.get(reply.get("verdict"))
+
+
 class AskDecider:
     """Always unsure: every message asks. Handy for a live test of the prompt flow."""
 
@@ -84,6 +109,8 @@ def build_decider(spec: dict, get_llm: Callable[[], Any]):
     timeout = float(spec.get("timeout_seconds") or 120)
     if backend == "llm":
         return LlmDecider(get_llm, timeout=timeout)
+    if backend == "local":
+        return LocalModelDecider(**(spec.get("options") or {}))
     if backend == "ask":
         return AskDecider()
     module, _, attr = backend.partition(":")

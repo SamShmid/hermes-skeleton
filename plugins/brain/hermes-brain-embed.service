@@ -1,0 +1,18 @@
+# systemd --user unit for the brain embedder (meaning search). Unix socket only, no network port.
+# Install: cp to ~/.config/systemd/user/ ; systemctl --user daemon-reload ; systemctl --user enable --now hermes-brain-embed
+[Unit]
+Description=Hermes brain embedder (local CPU model bge-small-en-v1.5, Unix socket only)
+
+[Service]
+Type=simple
+Environment=HERMES_HOME=%h/.hermes
+Environment=HF_HUB_OFFLINE=1
+Environment=HF_HUB_DISABLE_TELEMETRY=1
+ExecStart=%h/.hermes/venvs/brain-embed/bin/python %h/.hermes/plugins/brain/brain_embed_server.py
+Restart=always
+RestartSec=10
+Nice=5
+MemoryMax=700M
+
+[Install]
+WantedBy=default.target

@@ -2,7 +2,8 @@
 Docs, Sheets). Each account's OAuth token is stored ENCRYPTED in the password vault (vault_mcp.Vault, name
 GOOGLE_TOKEN_<LABEL>, service "google") and refreshed automatically; refreshed tokens are written back.
 
-There is deliberately NO tool that sends email, deletes email or deletes files.
+There is NO tool that deletes email or files. Email is sent only by gmail_send_draft, which the
+email-send-gate plugin puts behind the owner's approval button on every call.
 
 Sign-in works with no browser on the server (e.g. from a chat app):
   1. google_connect_start(account)   -> consent URL (PKCE, offline access)
@@ -167,14 +168,16 @@ class Google:
             "scope": " ".join(SCOPES), "access_type": "offline", "prompt": "consent",
             "include_granted_scopes": "true", "state": state, "code_challenge": challenge,
             "code_challenge_method": "S256"})
-        again = " (this replaces the existing connection when finished)" if label in self.labels() else ""
-        who = "a Google account" if label.startswith(AUTO_PREFIX) else f"Google account '{label}'"
-        return (f"Sign-in link for {who}{again}. Valid for {PENDING_TTL // 60} minutes.\n\n{url}\n\n"
-                "Open it, choose the Google account, and click Allow (if Google warns the app is unverified: "
-                "Advanced -> Go to Hermes; tick every permission box). " + (
-                    "You'll land on a Hermes page saying it's connected; then tell me you're done." if AUTO_CALLBACK else
-                    "The browser then shows a page that fails to load (localhost). Copy that page's full address "
-                    "from the address bar and give it to me."))
+        again = " This will replace the existing connection." if label in self.labels() else ""
+        steps = ("Pick the account on Google's page, click **Allow** (if Google warns the app is unverified: "
+                 "**Advanced → Go to Hermes**), and tick every box." + again)
+        if AUTO_CALLBACK:
+            steps += " I'll post here automatically when it's connected."
+        else:
+            steps += (" The page after Allow fails to load (localhost); copy its full address and send it to me.")
+        message = f"🔗 [Sign in with Google](<{url}>)\n{steps}"
+        return ("POST THIS MESSAGE TO THE USER EXACTLY AS WRITTEN, with nothing added before or after. Do not "
+                "paste the raw URL, do not ask which account, do not ask them to report back:\n\n" + message)
 
     def connect_finish(self, account: str, redirect_url_or_code: str) -> dict:
         label, c = label_of(account), self.client()
@@ -235,6 +238,19 @@ class Google:
             if state and secrets.compare_digest(str(p.get("state", "")), state):
                 return r["name"][len(PENDING_PREFIX):].lower()
         return None
+
+    def rename(self, account: str, new_label: str) -> str:
+        old, new = label_of(account), label_of(new_label)
+        tok = self._load(TOKEN_PREFIX, old)
+        if not tok:
+            raise ValueError(f"no connected Google account named '{old}'")
+        if old == new:
+            return f"'{old}' already has that name"
+        if new in self.labels():
+            raise ValueError(f"'{new}' is already used by another account")
+        self._store_token(new, tok)
+        self.v.delete(TOKEN_PREFIX + old.upper())
+        return f"renamed '{old}' to '{new}' ({tok.get('email')})"
 
     def disconnect(self, account: str) -> str:
         label = label_of(account)
@@ -369,6 +385,34 @@ def mail_body(payload: dict) -> tuple[str, list]:
     return re.sub(r"\n\s*\n+", "\n\n", text).strip(), files
 
 
+def attachment_parts(payload: dict) -> list:
+    """Every MIME part of a message that is a named file attachment."""
+    out = []
+
+    def walk(p):
+        if p.get("filename") and (p.get("body", {}).get("attachmentId") or p.get("body", {}).get("data")):
+            out.append(p)
+        for sub in p.get("parts", []) or []:
+            walk(sub)
+    walk(payload)
+    return out
+
+
+def _addr_set(value: str | None) -> set:
+    from email.utils import getaddresses
+    return {a.lower() for _, a in getaddresses([value or ""]) if a}
+
+
+def check_send_matches(headers: dict, to: str, cc: str, subject: str) -> None:
+    """Refuse to send unless the draft's recipients and subject are exactly what the approval showed."""
+    if headers.get("bcc"):
+        raise ValueError("refusing to send: the draft has Bcc recipients; remove them first")
+    if (_addr_set(headers.get("to")) != _addr_set(to) or _addr_set(headers.get("cc")) != _addr_set(cc)
+            or (headers.get("subject") or "").strip() != (subject or "").strip()):
+        raise ValueError(f"refusing to send: draft is To={headers.get('to')!r} Cc={headers.get('cc')!r} "
+                         f"Subject={headers.get('subject')!r}, which does not match the approval")
+
+
 def drive_q(query: str) -> str:
     q = (query or "").strip()
     if re.search(r"(=|\bcontains\b|\bin parents\b|\bmimeType\b|\btrashed\b|\bmodifiedTime\b)", q):
@@ -426,11 +470,17 @@ def build_server(g: Google | None = None):
     def google_accounts() -> list:
         return g.accounts()
 
-    @mcp.tool(description=f"Start connecting a Google account. Leave `account` empty unless {OWNER} gives a "
-                          "name: the account is then named from its email address after sign-in. Returns a sign-in "
-                          "link and instructions to pass on verbatim. Hermes is told in chat when sign-in finishes.")
-    def google_connect_start(account: str = "") -> str:
-        return g.connect_start(account)
+    @mcp.tool(description="Connect a Google account (Gmail/Drive/Calendar). Call this IMMEDIATELY when the user "
+                          "wants to connect/add a Google or Gmail account: do NOT ask which account or email first "
+                          "(they choose it on Google's page) and leave `account` empty unless they explicitly name a "
+                          "label. Then post the returned message verbatim; the chat is notified automatically "
+                          "when sign-in finishes or fails.")
+    def google_connect_start() -> str:
+        return g.connect_start("")  # always named from the email after sign-in
+
+    @mcp.tool(description=f"Rename a connected Google account's label. Only when {OWNER} asks for a different name.")
+    def google_rename_account(account: str, new_label: str) -> str:
+        return g.rename(account, new_label)
 
     @mcp.tool(description="Finish connecting: give the address of the page that failed to load after clicking "
                           "Allow (or just the code). Stores the token encrypted and returns the email address.")
@@ -507,6 +557,69 @@ def build_server(g: Google | None = None):
                lambda s: s.users().settings().filters().delete(userId="me", id=filter_id).execute())
         return f"deleted filter {filter_id}"
 
+    @mcp.tool(description=f"Create a Gmail DRAFT to anyone (never sends). Attach every attachment of existing "
+                          "emails (attach_from_message_ids = Gmail message ids) and/or local files (attach_files). "
+                          f"{OWNER} can review it in Gmail Drafts. To send it, use gmail_send_draft. {acct}")
+    def gmail_create_draft(account: str, to: str, subject: str, body: str, cc: str = "",
+                           attach_from_message_ids: list[str] | None = None,
+                           attach_files: list[str] | None = None) -> dict:
+        from email.message import EmailMessage
+        import mimetypes
+        msg = EmailMessage()
+        msg["To"], msg["Subject"] = to, subject
+        if cc:
+            msg["Cc"] = cc
+        msg.set_content(body)
+        local = [check_upload_path(f) for f in attach_files or []]
+
+        def add(raw: bytes, mime: str, name: str):
+            main, _, sub = (mime or "application/octet-stream").partition("/")
+            msg.add_attachment(raw, maintype=main, subtype=sub or "octet-stream", filename=name)
+
+        def run(s):
+            m, names = s.users().messages(), []
+            for mid in attach_from_message_ids or []:
+                full = m.get(userId="me", id=mid, format="full").execute()
+                for part in attachment_parts(full.get("payload", {})):
+                    data = part["body"].get("data") or m.attachments().get(
+                        userId="me", messageId=mid, id=part["body"]["attachmentId"]).execute()["data"]
+                    add(base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)), part.get("mimeType"),
+                        part["filename"])
+                    names.append(part["filename"])
+            for p in local:
+                add(p.read_bytes(), mimetypes.guess_type(p.name)[0], p.name)
+                names.append(p.name)
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            d = s.users().drafts().create(userId="me", body={"message": {"raw": raw}}).execute()
+            return {"draft_id": d["id"], "to": to, "cc": cc, "subject": subject, "attachments": names,
+                    "note": "Draft only, not sent."}
+        return g.call(account, "gmail", "v1", run)
+
+    @mcp.tool(description=f"List Gmail drafts (newest first): draft_id, to, cc, subject. {acct}")
+    def gmail_list_drafts(account: str, max: int = 20) -> list:
+        def run(s):
+            out = []
+            for it in s.users().drafts().list(userId="me", maxResults=cap(max, 1, 50)).execute().get("drafts", []):
+                d = s.users().drafts().get(userId="me", id=it["id"], format="metadata").execute()
+                h = _hdr(d["message"].get("payload", {}).get("headers"), "To", "Cc", "Subject")
+                out.append({"draft_id": d["id"], "to": h.get("to"), "cc": h.get("cc"), "subject": h.get("subject")})
+            return out
+        return g.call(account, "gmail", "v1", run)
+
+    @mcp.tool(description=f"Send an existing Gmail draft. Only when {OWNER} asked to send it. {OWNER} is always "
+                          "asked to approve in chat first (the email-send-gate plugin); pass the draft's exact "
+                          "to, cc and subject so the approval shows them. Drafts with Bcc are refused. "
+                          f"{acct}")
+    def gmail_send_draft(account: str, draft_id: str, to: str, subject: str, cc: str = "") -> dict:
+        def run(s):
+            d = s.users().drafts().get(userId="me", id=draft_id, format="full").execute()
+            h = _hdr(d["message"].get("payload", {}).get("headers"), "To", "Cc", "Bcc", "Subject")
+            check_send_matches(h, to, cc, subject)
+            sent = s.users().drafts().send(userId="me", body={"id": draft_id}).execute()
+            return {"sent": True, "message_id": sent.get("id"), "to": h.get("to"), "cc": h.get("cc"),
+                    "subject": h.get("subject")}
+        return g.call(account, "gmail", "v1", run)
+
     @mcp.tool(description=f"Search Google Drive by words (name/content) or a raw Drive query "
                           f"(e.g. \"mimeType = 'application/vnd.google-apps.folder'\"). {acct}")
     def drive_search(account: str, query: str, max: int = 20) -> list:
@@ -564,24 +677,57 @@ def build_server(g: Google | None = None):
             res = s.events().list(calendarId=calendar_id, timeMin=now.isoformat(), singleEvents=True,
                                   timeMax=(now + dt.timedelta(days=cap(days_ahead, 1, 90))).isoformat(),
                                   orderBy="startTime", maxResults=100, timeZone=DEFAULT_TZ).execute()
-            return [{"id": e["id"], "title": e.get("summary", "(no title)"),
-                     "start": e.get("start", {}).get("dateTime") or e.get("start", {}).get("date"),
-                     "end": e.get("end", {}).get("dateTime") or e.get("end", {}).get("date"),
-                     **({"location": e["location"]} if e.get("location") else {})} for e in res.get("items", [])]
+            out = []
+            for e in res.get("items", []):
+                me = next((a for a in e.get("attendees", []) if a.get("self")), None)
+                org = e.get("organizer", {})
+                out.append({"id": e["id"], "title": e.get("summary", "(no title)"),
+                            "start": e.get("start", {}).get("dateTime") or e.get("start", {}).get("date"),
+                            "end": e.get("end", {}).get("dateTime") or e.get("end", {}).get("date"),
+                            **({"location": e["location"]} if e.get("location") else {}),
+                            **({"my_response": me.get("responseStatus"),
+                                "organizer": org.get("email")} if me and not org.get("self") else {})})
+            return out
         return g.call(account, "calendar", "v3", run)
 
     @mcp.tool(description=f"Create a calendar event. start/end: YYYY-MM-DDTHH:MM (local time in timezone, default "
-                          f"{DEFAULT_TZ}) or YYYY-MM-DD for all-day. {acct}")
+                          f"{DEFAULT_TZ}) or YYYY-MM-DD for all-day. guests: comma-separated emails to invite "
+                          f"(Google emails them; {OWNER} must approve in chat first). {acct}")
     def calendar_create_event(account: str, title: str, start: str, end: str, description: str | None = None,
                               location: str | None = None, calendar_id: str = "primary",
-                              timezone: str = DEFAULT_TZ) -> dict:
+                              timezone: str = DEFAULT_TZ, guests: str = "") -> dict:
         if not (title or "").strip():
             raise ValueError("title required")
         s_, e_ = event_times(start, end, timezone or DEFAULT_TZ)
+        emails = [x.strip() for x in (guests or "").split(",") if x.strip()]
         body = {"summary": title.strip(), "start": s_, "end": e_,
-                **({"description": description} if description else {}), **({"location": location} if location else {})}
-        ev = g.call(account, "calendar", "v3", lambda s: s.events().insert(calendarId=calendar_id, body=body).execute())
-        return {"id": ev.get("id"), "link": ev.get("htmlLink"), "start": s_, "end": e_}
+                **({"description": description} if description else {}), **({"location": location} if location else {}),
+                **({"attendees": [{"email": x} for x in emails]} if emails else {})}
+        ev = g.call(account, "calendar", "v3", lambda s: s.events().insert(
+            calendarId=calendar_id, body=body, sendUpdates="all" if emails else "none").execute())
+        return {"id": ev.get("id"), "link": ev.get("htmlLink"), "start": s_, "end": e_,
+                **({"invited": emails} if emails else {})}
+
+    @mcp.tool(description=f"RSVP to a calendar invite: response = accepted, declined or tentative. event_id from "
+                          f"calendar_list. Pass the event's title so the approval shows it. The organizer is "
+                          f"notified; {OWNER} must approve in chat first. {acct}")
+    def calendar_rsvp(account: str, event_id: str, response: str, title: str = "", calendar_id: str = "primary") -> dict:
+        response = (response or "").strip().lower()
+        if response not in ("accepted", "declined", "tentative"):
+            raise ValueError("response must be accepted, declined or tentative")
+
+        def run(s):
+            ev = s.events().get(calendarId=calendar_id, eventId=event_id).execute()
+            att = ev.get("attendees", [])
+            me = next((a for a in att if a.get("self")), None)
+            if me is None:
+                raise ValueError("you are not a guest on this event, so there is nothing to RSVP to")
+            me["responseStatus"] = response
+            s.events().patch(calendarId=calendar_id, eventId=event_id, body={"attendees": att},
+                             sendUpdates="all").execute()
+            return {"event": ev.get("summary"), "response": response,
+                    "organizer": ev.get("organizer", {}).get("email")}
+        return g.call(account, "calendar", "v3", run)
 
     @mcp.tool(description=f"Create a Google Doc with the given title and plain text. {acct}")
     def docs_create(account: str, title: str, text: str = "") -> dict:
@@ -667,7 +813,10 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("serve")
     sub.add_parser("accounts")
-    sub.add_parser("connect-start").add_argument("account")
+    sub.add_parser("connect-start").add_argument("account", nargs="?", default="")
+    rn = sub.add_parser("rename")
+    rn.add_argument("account")
+    rn.add_argument("new_label")
     f = sub.add_parser("connect-finish")
     f.add_argument("account")
     f.add_argument("url", help="redirect address or code; '-' reads it from stdin")
@@ -684,6 +833,8 @@ def main(argv=None):
             print("no Google accounts connected")
     elif a.cmd == "connect-start":
         print(g.connect_start(a.account))
+    elif a.cmd == "rename":
+        print(g.rename(a.account, a.new_label))
     elif a.cmd == "connect-finish":
         print(json.dumps(g.connect_finish(a.account, sys.stdin.readline() if a.url == "-" else a.url), indent=2))
     elif a.cmd == "test":

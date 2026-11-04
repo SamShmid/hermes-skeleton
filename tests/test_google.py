@@ -277,6 +277,28 @@ class ToolTests(Base):
         self.tool("calendar_create_event")("personal", "Dentist", "2026-10-10T09:00", "2026-10-10T10:00")
         self.assertEqual(self.svc.events().insert.call_args.kwargs["body"]["start"]["timeZone"], "America/New_York")
 
+    def test_calendar_guests_and_rsvp(self):
+        ev = self.svc.events()
+        ev.insert.return_value.execute.return_value = {"id": "e2"}
+        out = self.tool("calendar_create_event")("personal", "Call", "2026-11-05T10:00", "2026-11-05T10:30",
+                                                 guests=f"a{AT}example.com, b{AT}example.com")
+        kw = ev.insert.call_args.kwargs
+        self.assertEqual(kw["sendUpdates"], "all")
+        self.assertEqual(len(kw["body"]["attendees"]), 2)
+        self.assertEqual(len(out["invited"]), 2)
+        ev.get.return_value.execute.return_value = {"summary": "Mtg", "organizer": {"email": f"o{AT}example.com"},
+                                                    "attendees": [{"email": "x", "self": True,
+                                                                   "responseStatus": "needsAction"}]}
+        out = self.tool("calendar_rsvp")("personal", "e9", "Accepted")
+        self.assertEqual(out["response"], "accepted")
+        body = ev.patch.call_args.kwargs["body"]
+        self.assertEqual(body["attendees"][0]["responseStatus"], "accepted")
+        with self.assertRaises(ValueError):
+            self.tool("calendar_rsvp")("personal", "e9", "maybe")
+        ev.get.return_value.execute.return_value = {"attendees": []}
+        with self.assertRaises(ValueError):
+            self.tool("calendar_rsvp")("personal", "e9", "declined")
+
     def test_drive_query_and_read(self):
         dq = self.mod.drive_q
         self.assertEqual(dq("tax o'brien"), "(name contains 'tax o\\'brien' or fullText contains 'tax o\\'brien') "
@@ -318,21 +340,27 @@ class ToolTests(Base):
 
 
 class NoSendTests(Base):
-    EXPECTED = {"google_accounts", "google_connect_start", "google_connect_finish", "google_disconnect",
+    EXPECTED = {"google_accounts", "google_connect_start", "google_connect_finish", "google_disconnect", "google_rename_account",
                 "gmail_search", "gmail_read", "gmail_list_filters", "gmail_create_filter", "gmail_delete_filter",
                 "drive_search", "drive_read", "drive_upload", "drive_create_folder", "calendar_list",
-                "calendar_create_event", "docs_create", "sheets_read", "sheets_append"}
+                "calendar_create_event", "calendar_rsvp", "docs_create", "sheets_read", "sheets_append",
+                "gmail_create_draft", "gmail_list_drafts", "gmail_send_draft"}
 
     def test_tool_set_is_exactly_expected(self):
         tools = {t.name for t in asyncio.run(self.mod.build_server(self.g).list_tools())}
         self.assertEqual(tools, self.EXPECTED)
-        self.assertFalse([t for t in tools if re.search(r"send|draft|trash|delete_(file|email|message|event)", t)])
+        # the only send tool is gmail_send_draft, gated by the email-send-gate plugin
+        self.assertFalse([t for t in tools if re.search(r"send|trash|delete_(file|email|message|event)", t)
+                          and t != "gmail_send_draft"])
 
     def test_no_send_scope_and_no_destructive_calls(self):
         self.assertFalse(set(self.mod.SCOPES) & self.mod.FORBIDDEN_SCOPES)
         code = "\n".join(ln for ln in SRC.split('"""', 2)[2].splitlines()  # skip docstring + the deny-list
                          if not ln.startswith("FORBIDDEN_SCOPES"))
-        for pat in (r"\.send\(", r"drafts\(", r"messages\(\)\.(trash|delete|batchDelete)", r"\.batchDelete\(",
+        # exactly one send: drafts().send inside the gated gmail_send_draft tool
+        self.assertEqual(len(re.findall(r"\.send\(", code)), 1)
+        self.assertIn("drafts().send(", code)
+        for pat in (r"messages\(\)\.(trash|delete|batchDelete)", r"\.batchDelete\(",
                     r"files\(\)\.(delete|emptyTrash)", r"events\(\)\.delete", r"threads\(\)", r"gmail\.send"):
             self.assertIsNone(re.search(pat, code), pat)
 

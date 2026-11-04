@@ -101,8 +101,48 @@ def _loop(ctx, stop: threading.Event):
             log.warning("google-notify: delivery pass failed: %s", exc)
 
 
+VAULT_PY = HOME / "vault" / ".venv" / "bin" / "python"
+GOOGLE_MCP = HOME / "vault" / "google_mcp.py"
+HELP = ("`/google connect`: get a sign-in link (pick the account on Google's page; it's named from the email)\n"
+        "`/google accounts`: list connected accounts\n"
+        "`/google rename <account> <new-name>`: rename one")
+
+
+def _cli(*args, timeout=60) -> str:
+    import subprocess
+    r = subprocess.run([str(VAULT_PY), str(GOOGLE_MCP), *args], capture_output=True, text=True, timeout=timeout,
+                       env={**os.environ})
+    return (r.stdout or r.stderr or "").strip()
+
+
+def cmd_google(raw: str) -> str:
+    """No-LLM command: connect / accounts / rename."""
+    parts = (raw or "").split()
+    sub = parts[0].lower() if parts else "connect"
+    if sub in ("connect", "add", "new"):
+        out = _cli("connect-start")
+        msg = out.split("\n\n", 1)[1] if out.startswith("POST THIS MESSAGE") and "\n\n" in out else out
+        m, key = STATE_RE.search(out), _session_key()
+        if m and key:
+            with _lock:
+                d = {s: v for s, v in _load().items() if time.time() - v.get("ts", 0) < KEEP}
+                d[m.group(1)[:16]] = {"session_key": key, "ts": time.time()}
+                _save(d)
+        return msg
+    if sub in ("accounts", "list", "status"):
+        lines = [l for l in _cli("accounts").splitlines() if l.strip() and not l.strip().startswith("scopes:")]
+        return "**Connected Google accounts**\n" + "\n".join(
+            f"• `{l.split()[0]}`: {l.split()[1]}" + ("" if " ok " in f" {l} " else " ⚠️ needs reconnect")
+            for l in lines if len(l.split()) >= 2) if lines else "No Google accounts connected yet."
+    if sub == "rename" and len(parts) == 3:
+        return _cli("rename", parts[1], parts[2])
+    return HELP
+
+
 def register(ctx):
     ctx.register_hook("post_tool_call", on_tool)
+    ctx.register_command("google", cmd_google, description="Connect or list Google accounts (no questions asked)",
+                         args_hint="[connect | accounts | rename <account> <new-name>]")
     import sys
     if sys.argv[1:3] == ["gateway", "run"]:
         stop = threading.Event()

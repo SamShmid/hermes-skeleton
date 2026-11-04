@@ -9,9 +9,12 @@
    rebuild index.md; git commit
 4. flag secret-looking text in facts or wiki pages
 
-Prints a short summary only when something happened (a script-only cron job delivers it to chat).
+Prints a short summary only when something changed: a wiki page was rewritten, a duplicate fact was
+retired, or a step failed (a script-only cron job delivers it to chat; nothing printed = no post).
+Proposals sent to the approver, broken links and secret-looking text alone do not trigger a post
+(they repeat nightly); --verbose prints the full summary anyway (2026-11-01).
 Owner name/pronouns come from plugins.entries.brain.settings (owner_name, owner_pronouns).
-  brain_tidy.py [--dry-run] [--no-llm] [--force]
+  brain_tidy.py [--dry-run] [--no-llm] [--force] [--verbose]
 """
 from __future__ import annotations
 
@@ -286,11 +289,13 @@ def main(argv=None):
     a.add_argument("--dry-run", action="store_true")
     a.add_argument("--no-llm", action="store_true")
     a.add_argument("--force", action="store_true", help="redo every project, ignoring change hashes")
+    a.add_argument("--verbose", action="store_true", help="print the summary even when nothing changed")
     args = a.parse_args(argv)
     store = Store.open()
     store.index_wiki(force=True)
     report, errors = [], []
 
+    pages = []
     dups = retire_exact_duplicates(store, args.dry_run)
     if dups:
         report.append(f"➖ {dups} exact duplicate fact(s) retired")
@@ -312,7 +317,6 @@ def main(argv=None):
                 errors.append(f"consolidate {project or 'general'}: {type(exc).__name__}")
         if proposed:
             report.append(f"🔁 {proposed} merge/cleanup change(s) sent to the approver")
-        pages = []
         try:
             pages = build_pages(store, args.dry_run, args.force)
         except Exception as exc:
@@ -335,7 +339,8 @@ def main(argv=None):
         report.append(f"🔑 secret-looking text in: {', '.join(secrets[:8])} (move it to the vault)")
     if errors:
         report.append("⚠️ " + "; ".join(errors))
-    if report:
+    changed = bool(dups) or bool(pages) or bool(errors)
+    if report and (changed or args.verbose or args.dry_run):
         print("🧹 **Brain tidy**" + (" (dry run)" if args.dry_run else ""))
         print("\n".join(report))
 

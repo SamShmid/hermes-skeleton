@@ -772,8 +772,9 @@ def kuma_from_metrics(url: str, user: str, pw: str, kc: dict) -> dict:
     with urllib.request.urlopen(req, timeout=30) as resp:
         text = resp.read().decode()
     out = []
-    for m in re.finditer(r'^monitor_status\{monitor_name="([^"]*)",monitor_type="([^"]*)"[^}]*\}\s+(\d+)', text, re.M):
-        name, mtype, st = m.group(1), m.group(2), int(m.group(3))
+    for m in re.finditer(r'^monitor_status\{([^}]*)\}\s+(\d+)', text, re.M):
+        labels = dict(re.findall(r'(\w+)="([^"]*)"', m.group(1)))  # Kuma 2 adds tag labels first
+        name, mtype, st = labels.get("monitor_name", "?"), labels.get("monitor_type", ""), int(m.group(2))
         if mtype == "group" or matches_any(name, kc["ignore_monitors"]):
             continue
         out.append({"name": name, "project": name.split(" — ")[0], "status": st, "uptime": None,
@@ -1136,7 +1137,8 @@ def project_uptime(monitors: list[dict]) -> list[tuple[str, float | None, list[d
     return out
 
 
-def render_weekly(rep: dict, state: dict, diff: dict, cfg: dict, now: dt.datetime) -> str:
+def render_weekly_full(rep: dict, state: dict, diff: dict, cfg: dict, now: dt.datetime) -> str:
+    """The long weekly report (every section). Used with --full; the cron job uses render_weekly."""
     lim = cfg["max_items"]
     week_ago = (now - dt.timedelta(days=7)).isoformat(timespec="seconds")
     repos = rep["repos"]
@@ -1270,6 +1272,88 @@ def render_weekly(rep: dict, state: dict, diff: dict, cfg: dict, now: dt.datetim
     return "\n\n".join(paginate(blocks, cfg["message_limit"]))
 
 
+def repo_fix(fs: list[dict]) -> str:
+    """One fix command for a repo: the worst finding that has one; secrets get the rotate advice."""
+    for f in sorted(fs, key=lambda f: -SEV_RANK.get(f.get("severity"), 1)):
+        if f.get("fix"):
+            return f["fix"]
+    if any(f.get("source") in SECRET_SOURCES for f in fs):
+        return "rotate the secret, then list it in .gitleaksignore"
+    url = next((f["url"] for f in fs if f.get("url")), "")
+    return f"see {url}" if url else "no automatic fix"
+
+
+def render_weekly(rep: dict, state: dict, diff: dict, cfg: dict, now: dt.datetime) -> str:
+    """Short weekly report (since 2026-11-01): one total line, then the top WEEKLY_TOP repos by worst
+    severity, one line each with the fix command. Repos that are archived or were last pushed more than
+    cfg["weekly_active_days"] (default 90) days ago are skipped (their count is noted). --full prints the
+    old long report."""
+    top_n = int(cfg.get("weekly_top", 5))
+    active_days = int(cfg.get("weekly_active_days", 90))
+    week_ago = (now - dt.timedelta(days=7)).isoformat(timespec="seconds")
+    cutoff = now - dt.timedelta(days=active_days)
+    repos = {r["key"]: r for r in rep["repos"]}
+    live = {k for k, r in repos.items()
+            if not r.get("archived") and (parse_ts(r.get("pushed_at")) or (cutoff - dt.timedelta(days=1))) > cutoff}
+    findings = [dict(f, id=i) for i, f in state["findings"].items()]
+    base = state.get("baseline", "")
+    new_ids = {f["id"] for f in findings if f.get("first_seen", "") >= week_ago and f.get("first_seen") != base}
+    threshold = cfg["severity_threshold"]
+    shown = [f for f in findings if f.get("repo") in live and sev_at_least(f.get("severity", "unknown"), threshold)]
+    by_repo: dict[str, list[dict]] = {}
+    for f in shown:
+        by_repo.setdefault(f["repo"], []).append(f)
+    ranked = sorted(by_repo.items(), key=lambda kv: (
+        -max(SEV_RANK.get(f.get("severity"), 1) for f in kv[1]),
+        -sum(1 for f in kv[1] if f.get("severity") in ("critical", "high")), -len(kv[1]), kv[0]))
+    skipped_repos = {f.get("repo") for f in findings if f.get("repo") not in live}
+    skipped_n = sum(1 for f in findings if f.get("repo") not in live)
+    fail = state["ci_failing"]
+    mon = rep.get("monitors")
+
+    lines = [f"## 🛰️ {cfg['title']} — weekly ({now.strftime('%b %d')})"]
+    total = (f"Total: {counts_str(sev_counts(shown))} in {len(by_repo)} active repo(s)"
+             + (f" · 🆕 {len(new_ids & {f['id'] for f in shown})} this week" if new_ids else "")
+             + (f" · {skipped_n} more in {len(skipped_repos)} archived/idle repo(s), not listed" if skipped_n else "")
+             + (f" · CI 🔴 {len(fail)} failing" if fail else " · CI ✅"))
+    if mon:
+        down = [m for m in mon["monitors"] if m["status"] in (0, 2)]
+        total += f" · uptime 🔴 {len(down)} down" if down else f" · uptime 🟢 {len(mon['monitors'])} up"
+    elif cfg["uptime_kuma"]["enabled"]:
+        total += " · uptime ⚠️ Kuma unreachable"
+    lines.append(total)
+    if ranked:
+        lines.append(f"Top {min(top_n, len(ranked))} (worst first, pushed ≤{active_days}d):")
+        for key, fs in ranked[:top_n]:
+            c = sev_counts(fs)
+            worst = max(fs, key=lambda f: SEV_RANK.get(f.get("severity"), 1)).get("severity", "unknown")
+            sev = " ".join(f"{c[s]}{SEV_EMOJI[s]}" for s in ("critical", "high", "medium", "low") if c[s])
+            n_new = sum(1 for f in fs if f["id"] in new_ids)
+            lines.append(f"- {SEV_EMOJI.get(worst, '🟡')} `{short(key)}` {sev}" + (f" (🆕 {n_new})" if n_new else "")
+                         + f" → `{clip(repo_fix(fs), 90)}`")
+    else:
+        lines.append(f"- nothing at or above {threshold} in active repos")
+    if fail:
+        lines.append("CI failing: " + ", ".join(f"`{short(k.split('::')[0])}` {esc(k.split('::', 1)[1])}"
+                                                for k in sorted(fail)[:3]) + (" …" if len(fail) > 3 else ""))
+    errs = rep["errors"]
+    if errs:
+        lines.append(f"⚠️ {len(errs)} check error(s): " + "; ".join(f"{k}: {clip(v, 50)}" for k, v in list(errs.items())[:2]))
+    return "\n".join(lines)
+
+
+def _save_alert_numbers(cfg: dict, shown: list[dict], now: dt.datetime) -> None:
+    """Remember which number maps to which finding so the owner can reply 'fix 2'."""
+    try:
+        path = state_path(cfg).parent / "security_alert_last.json"
+        items = [{"n": i, "id": f.get("id"), "repo": f.get("repo"), "severity": f.get("severity"),
+                  "source": f.get("source"), "title": f.get("title"), "fix": f.get("fix"), "url": f.get("url")}
+                 for i, f in enumerate(shown, 1)]
+        path.write_text(json.dumps({"at": now.isoformat(), "items": items}, indent=1))
+    except Exception:
+        pass
+
+
 def render_daily(rep: dict, state: dict, diff: dict, cfg: dict, now: dt.datetime) -> str:
     """Empty string unless something is new or newly broken."""
     lim = cfg["max_items"]
@@ -1293,10 +1377,14 @@ def render_daily(rep: dict, state: dict, diff: dict, cfg: dict, now: dt.datetime
         lines += bullets([f"- `{short(k.split('::')[0])}` {esc(k.split('::', 1)[1])}" for k in diff["ci_new"]], lim)
     if new_f:
         lines.append(f"**🛡️ New findings (≥ {cfg['alert_severity']})**")
-        if len(new_f) <= lim:
-            lines += [finding_line(f, True) for f in sort_findings(new_f)]
-        else:
-            lines += bullets([group_line(g) for g in group_findings(new_f)], lim)
+        ordered = sort_findings(new_f)
+        shown = ordered[:lim] if len(ordered) > lim else ordered
+        for i, f in enumerate(shown, 1):
+            lines.append(f"{i}. " + finding_line(f, True)[2:])
+        if len(ordered) > len(shown):
+            lines.append(f"…and {len(ordered) - len(shown)} more (weekly report has the rest)")
+        _save_alert_numbers(cfg, shown, now)
+        lines.append("Say `fix 1` (or `fix <repo>`) and we will plan the fix together, then a coding agent opens the PR.")
     if diff["errors_new"]:
         lines.append("**⚠️ Check errors**")
         lines += bullets([f"- {k}: {esc(clip(rep['errors'].get(k, ''), 100))}" for k in diff["errors_new"]], lim)
@@ -1318,6 +1406,7 @@ def main(argv=None) -> int:
     ap.add_argument("--config", type=Path, default=None)
     ap.add_argument("--dry-run", action="store_true", help="don't write the state file")
     ap.add_argument("--verbose", action="store_true", help="progress to stderr")
+    ap.add_argument("--full", action="store_true", help="weekly: the long report with every section")
     a = ap.parse_args(argv)
     cfg = load_config(a.config or default_config_path())
     log = (lambda *x: print(*x, file=sys.stderr)) if a.verbose else (lambda *x: None)
@@ -1326,7 +1415,8 @@ def main(argv=None) -> int:
     prev = load_state(sp)
     rep = collect(cfg, log)
     state, diff = update_state(prev, rep, cfg, now)
-    out = (render_weekly if a.mode == "weekly" else render_daily)(rep, state, diff, cfg, now)
+    renderer = render_daily if a.mode == "daily" else (render_weekly_full if a.full else render_weekly)
+    out = renderer(rep, state, diff, cfg, now)
     if not a.dry_run:
         save_state(sp, state)
     if out:

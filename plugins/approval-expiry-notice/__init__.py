@@ -1,5 +1,7 @@
 """approval-expiry-notice: when Discord approval buttons expire but Hermes is still waiting,
-post a fresh message telling the user how to answer by typing.
+post a fresh message telling the user how to answer by typing. Also: when a new message arrives
+while Hermes is blocked on an approval, say it was queued (core queues it as the next turn) and
+what is still waiting, so nobody is left in the dark.
 
 Discord kills button views after at most 15 minutes, while the approval itself waits much
 longer (approvals.timeout). The expired embed edit doesn't notify anyone, so this sends a
@@ -15,6 +17,7 @@ logger = logging.getLogger("plugins.approval_expiry_notice")
 
 _DEFAULT_BUTTON_TIMEOUT = 300
 _timers: dict = {}
+_queued: dict = {}  # session key -> messages queued behind the open approval
 _lock = threading.Lock()
 
 
@@ -47,6 +50,46 @@ def notice_text(command: str) -> str:
         f"Command: `{cmd}`\n"
         "Reply with **approve** (once), **session**, **always**, or **deny**. 👍 / 👎 also work."
     )
+
+
+def queued_text(command: str, n: int) -> str:
+    cmd = " ".join((command or "").split())
+    if len(cmd) > 120:
+        cmd = cmd[:117] + "..."
+    waiting = f"\nWaiting on: `{cmd}`" if cmd else ""
+    return (
+        f"📥 Queued your message ({n} waiting). I'm still waiting on your OK for a command before I can "
+        f"continue.{waiting}\n"
+        "Reply **approve**, **session** or **deny** (or tap the buttons above); your message runs right after."
+    )
+
+
+async def _on_dispatch(event=None, gateway=None, **_kw):
+    """Announce (never change) a message that core will queue behind an open approval."""
+    source = getattr(event, "source", None)
+    if (event is None or gateway is None or source is None or getattr(event, "internal", False)
+            or getattr(source, "is_bot", False)):
+        return None
+    try:
+        from tools.approval import get_pending_gateway_approval, has_blocking_approval
+        key = gateway._session_key_for_source(source)
+        text = (event.text or "").strip()
+        if not text or event.get_command() or not has_blocking_approval(key):
+            return None
+        if not gateway._is_user_authorized_for_source(source):
+            return None
+        if text.lower() in gateway._plaintext_approval_words():
+            return None  # that is the answer itself
+        pending = get_pending_gateway_approval(key) or {}
+        with _lock:
+            n = _queued[key] = _queued.get(key, 0) + 1
+        adapter = gateway._delivery_adapter_for(source)
+        await adapter.send(str(source.chat_id), queued_text(pending.get("command", ""), n),
+                           metadata=gateway._thread_metadata_for_source(source))
+        logger.info("approval-expiry-notice: queued notice session=%s n=%d", key, n)
+    except Exception as exc:
+        logger.warning("approval-expiry-notice: queued notice failed: %s", exc)
+    return None
 
 
 def _still_pending(session_key: str) -> bool:
@@ -102,6 +145,7 @@ def _on_request(session_key="", command="", **_kw):
 
 def _on_response(session_key="", **_kw):
     with _lock:
+        _queued.pop(session_key, None)
         timer = _timers.pop(session_key, None)
     if timer is not None:
         timer.cancel()
@@ -111,3 +155,4 @@ def _on_response(session_key="", **_kw):
 def register(ctx):
     ctx.register_hook("pre_approval_request", _on_request)
     ctx.register_hook("post_approval_response", _on_response)
+    ctx.register_hook("pre_gateway_dispatch", _on_dispatch)
