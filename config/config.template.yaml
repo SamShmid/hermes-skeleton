@@ -122,6 +122,7 @@ plugins:
     - topic-router
     - quiet-background
     - approval-expiry-notice
+    - email-send-gate                 # approval button on every email send, RSVP and guest invite
   entries:
     brain:
       settings:
@@ -176,7 +177,7 @@ mcp_servers:
     enabled: true
     env:
       VAULT_OWNER_NAME: <OWNER_NAME>
-      SOFOS_URL: <SOFOS_URL>            # e.g. https://sofos.example.ts.net
+      SOFOS_URL: <SOFOS_URL>            # e.g. https://sofos.example.com
       SOFOS_TZ: <TIMEZONE>
 
 # --- toolset trims: drop toolsets that are unused or unavailable --------------

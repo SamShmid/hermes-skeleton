@@ -8,7 +8,7 @@ SYSTEMD_USER_DIR="${SYSTEMD_USER_DIR:-$HOME/.config/systemd/user}"
 DRY_RUN="${DRY_RUN:-0}"
 
 # Plugins/scripts this repo owns. Deploy never deletes anything else in $HERMES_HOME.
-SKELETON_PLUGINS=(brain brain-ops topic-router quiet-background approval-expiry-notice)
+SKELETON_PLUGINS=(brain brain-ops topic-router quiet-background approval-expiry-notice email-send-gate)
 # HERMES_SKELETON_KEEP_LOCAL=1 (update.sh --keep-local-plugins): leave the plugins, scripts, locales and
 # vault code already in $HERMES_HOME alone; only the systemd drop-ins are (re)installed.
 HERMES_SKELETON_KEEP_LOCAL="${HERMES_SKELETON_KEEP_LOCAL:-0}"

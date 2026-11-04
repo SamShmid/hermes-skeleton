@@ -677,24 +677,57 @@ def build_server(g: Google | None = None):
             res = s.events().list(calendarId=calendar_id, timeMin=now.isoformat(), singleEvents=True,
                                   timeMax=(now + dt.timedelta(days=cap(days_ahead, 1, 90))).isoformat(),
                                   orderBy="startTime", maxResults=100, timeZone=DEFAULT_TZ).execute()
-            return [{"id": e["id"], "title": e.get("summary", "(no title)"),
-                     "start": e.get("start", {}).get("dateTime") or e.get("start", {}).get("date"),
-                     "end": e.get("end", {}).get("dateTime") or e.get("end", {}).get("date"),
-                     **({"location": e["location"]} if e.get("location") else {})} for e in res.get("items", [])]
+            out = []
+            for e in res.get("items", []):
+                me = next((a for a in e.get("attendees", []) if a.get("self")), None)
+                org = e.get("organizer", {})
+                out.append({"id": e["id"], "title": e.get("summary", "(no title)"),
+                            "start": e.get("start", {}).get("dateTime") or e.get("start", {}).get("date"),
+                            "end": e.get("end", {}).get("dateTime") or e.get("end", {}).get("date"),
+                            **({"location": e["location"]} if e.get("location") else {}),
+                            **({"my_response": me.get("responseStatus"),
+                                "organizer": org.get("email")} if me and not org.get("self") else {})})
+            return out
         return g.call(account, "calendar", "v3", run)
 
     @mcp.tool(description=f"Create a calendar event. start/end: YYYY-MM-DDTHH:MM (local time in timezone, default "
-                          f"{DEFAULT_TZ}) or YYYY-MM-DD for all-day. {acct}")
+                          f"{DEFAULT_TZ}) or YYYY-MM-DD for all-day. guests: comma-separated emails to invite "
+                          f"(Google emails them; {OWNER} must approve in chat first). {acct}")
     def calendar_create_event(account: str, title: str, start: str, end: str, description: str | None = None,
                               location: str | None = None, calendar_id: str = "primary",
-                              timezone: str = DEFAULT_TZ) -> dict:
+                              timezone: str = DEFAULT_TZ, guests: str = "") -> dict:
         if not (title or "").strip():
             raise ValueError("title required")
         s_, e_ = event_times(start, end, timezone or DEFAULT_TZ)
+        emails = [x.strip() for x in (guests or "").split(",") if x.strip()]
         body = {"summary": title.strip(), "start": s_, "end": e_,
-                **({"description": description} if description else {}), **({"location": location} if location else {})}
-        ev = g.call(account, "calendar", "v3", lambda s: s.events().insert(calendarId=calendar_id, body=body).execute())
-        return {"id": ev.get("id"), "link": ev.get("htmlLink"), "start": s_, "end": e_}
+                **({"description": description} if description else {}), **({"location": location} if location else {}),
+                **({"attendees": [{"email": x} for x in emails]} if emails else {})}
+        ev = g.call(account, "calendar", "v3", lambda s: s.events().insert(
+            calendarId=calendar_id, body=body, sendUpdates="all" if emails else "none").execute())
+        return {"id": ev.get("id"), "link": ev.get("htmlLink"), "start": s_, "end": e_,
+                **({"invited": emails} if emails else {})}
+
+    @mcp.tool(description=f"RSVP to a calendar invite: response = accepted, declined or tentative. event_id from "
+                          f"calendar_list. Pass the event's title so the approval shows it. The organizer is "
+                          f"notified; {OWNER} must approve in chat first. {acct}")
+    def calendar_rsvp(account: str, event_id: str, response: str, title: str = "", calendar_id: str = "primary") -> dict:
+        response = (response or "").strip().lower()
+        if response not in ("accepted", "declined", "tentative"):
+            raise ValueError("response must be accepted, declined or tentative")
+
+        def run(s):
+            ev = s.events().get(calendarId=calendar_id, eventId=event_id).execute()
+            att = ev.get("attendees", [])
+            me = next((a for a in att if a.get("self")), None)
+            if me is None:
+                raise ValueError("you are not a guest on this event, so there is nothing to RSVP to")
+            me["responseStatus"] = response
+            s.events().patch(calendarId=calendar_id, eventId=event_id, body={"attendees": att},
+                             sendUpdates="all").execute()
+            return {"event": ev.get("summary"), "response": response,
+                    "organizer": ev.get("organizer", {}).get("email")}
+        return g.call(account, "calendar", "v3", run)
 
     @mcp.tool(description=f"Create a Google Doc with the given title and plain text. {acct}")
     def docs_create(account: str, title: str, text: str = "") -> dict:

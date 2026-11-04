@@ -1,0 +1,9 @@
+name: email-send-gate
+version: 0.2.0
+description: >
+  Every Gmail send (google gmail_send_draft), every calendar RSVP, and every new event that invites
+  guests needs the owner's approval button in chat, every time. The model cannot skip it: the gate
+  runs in the gateway, not in the model.
+author: hermes-skeleton
+provides_hooks:
+  - pre_tool_call
